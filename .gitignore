@@ -1,3 +1,5 @@
 .auth/
 .ipynb_checkpoints/
 .test/
+.profile/
+.datos/
