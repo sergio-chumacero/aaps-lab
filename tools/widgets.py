@@ -8,7 +8,7 @@ import docx
 from datetime import datetime
 
 class GenerateReportWidget(widgets.VBox):
-    def __init__(self):
+    def __init__(self, **kwargs):
         home_dir = os.path.join(os.environ['USERPROFILE'],'aapslab')
         report_profile_path = os.path.join(home_dir,'.profile','report_profile.json')
         model_path = os.path.join(home_dir,'tools','models','modelo_poa.docx')
@@ -74,33 +74,44 @@ class GenerateReportWidget(widgets.VBox):
         month_num_to_name = {k+1:v for k,v in zip(range(12), month_names)}
 
         def on_generate_button_click(b):
-            
-            if os.path.exists(model_path):
-                test_doc = docx.Document(model_path)
-            else:
-                help_html.value = '<font color="red">No se encontró el modelo base de POA!</font>'
-                return
-            
-            test_doc.paragraphs[3].text = f'AAPS/DER/INF/{report_number.value:03d}/2019'
+            try:
+                if os.path.exists(model_path):
+                    doc = docx.Document(model_path)
+                else:
+                    help_html.value = '<font color="red">No se encontró el modelo base de POA.</font>'
+                    return
 
-            prof = qualification_type.value
-            denom = prof_name_to_denom[prof]
+                doc.paragraphs[3].text = f'AAPS/DER/INF/{report_number.value:03d}/2019'
 
-            test_doc.tables[0].columns[2].cells[2].paragraphs[3].text = f'{denom} {name_text.value}'.title()
-            test_doc.tables[0].columns[2].cells[2].paragraphs[4].text = f'{prof} {specialty_text.value}'.upper()
-            test_doc.tables[0].columns[2].cells[5].paragraphs[0].text = f'La Paz, {now.day} de {month_num_to_name[now.month]} de {now.year}'
+                prof = qualification_type.value
+                denom = prof_name_to_denom[prof]
 
-            if not os.path.exists(out_path):
-                os.makedirs(out_path)
-                
-            test_doc.save(os.path.join(out_path,f'reporte_poa_{month_num_to_name[now.month]}_{now.day}_{now.hour}_{now.minute}.docx'))
+                col = doc.tables[0].columns[2]
+                col.cells[2].paragraphs[3].text = f'{denom} {name_text.value}'.title()
+                col.cells[2].paragraphs[4].text = f'{prof} {specialty_text.value}'.upper()
+                col.cells[5].paragraphs[0].text = f'La Paz, {now.day} de {month_num_to_name[now.month]} de {now.year}'
 
-            help_html.value = 'Informe generado y guardado en la carpeta <code>datos/reportes</code>!</br>Puedes descargar los reportes desde el navegador (<a href="http://localhost:8888/tree/datos/reportes"><font color="blue">LINK</font></a>) o acceder a ellos directamente a la carpeta en tu ordenador.'
+                if not os.path.exists(out_path):
+                    os.makedirs(out_path)
+
+                doc.save(os.path.join(out_path,f'reporte_poa_{month_num_to_name[now.month]}_{now.day}_{now.hour}_{now.minute}.docx'))
+
+                help_html.value = 'Informe generado y guardado en la carpeta <code>datos/reportes</code>!</br>Puedes descargar los reportes desde el navegador (<a href="http://localhost:8888/tree/datos/reportes"><font color="blue">LINK</font></a>) o acceder a ellos directamente a la carpeta en tu ordenador.'
+                if os.path.exists(report_profile_path):
+                    with open(report_profile_path,'r') as f:
+                        report_profile_json = json.load(f)
+
+                    report_profile_json['last_report_num'] = report_number.value
+
+                    with open(report_profile_path,'w') as f:
+                        json.dump(report_profile_json,f)
+            except Exception as e:
+                help_html.value = f"<font color='red'>{str(e)}</font>"
 
         def on_save_profile_button_click(b):
             try:
                 if not os.path.exists(os.path.dirname(report_profile_path)):
-                    os.makedirs(os.path.dirnaem(report_profile_path))
+                    os.makedirs(os.path.dirname(report_profile_path))
 
                 report_profile_json = dict(
                     name=name_text.value,
@@ -114,17 +125,21 @@ class GenerateReportWidget(widgets.VBox):
 
                 help_html.value = 'Perfil guardado!'
             except Exception as e:
-                help_html.value = str(e)
+                help_html.value = f"<font color='red'>{str(e)}</font>"
 
         generate_button.on_click(on_generate_button_click)
         save_profile_button.on_click(on_save_profile_button_click)
+        
+        accordion = widgets.Accordion([widgets.VBox([name_text, qualification_type, specialty_text, report_number,])])
+        accordion.set_title(0, 'Datos Generales')
+        accordion.selected_index = None
 
-        super().__init__(children=[name_text, qualification_type, specialty_text, report_number, widgets.HBox([generate_button,save_profile_button]),help_html])
+        super().__init__(children=[accordion,widgets.HBox([generate_button,save_profile_button]),help_html], **kwargs)
         
 
 class LoginWidget(widgets.VBox):
     
-    def __init__(self):
+    def __init__(self, **kwargs):
         token_json_path = os.path.join(os.getcwd(), '.auth', 'token.json')
         host = '200.87.123.68'
         protocol = 'http'
@@ -228,4 +243,4 @@ class LoginWidget(widgets.VBox):
         else:
             help_html0.value = "<font color='green'>Token de autorización encontrado. Todo listo para cargar datos!</font>"
         
-        super().__init__(children=[help_html0,l_widget,])
+        super().__init__(children=[help_html0,l_widget,], **kwargs)
