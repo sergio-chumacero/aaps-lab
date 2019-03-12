@@ -11,7 +11,7 @@ class GenerateReportWidget(widgets.VBox):
     def __init__(self, **kwargs):
         home_dir = os.path.join(os.environ['USERPROFILE'],'aapslab')
         report_profile_path = os.path.join(home_dir,'.profile','report_profile.json')
-        model_path = os.path.join(home_dir,'tools','models','modelo_poa.docx')
+        model_path = os.path.join(home_dir,'.lib','models','modelo_poa.docx')
         out_path = os.path.join(home_dir,'datos','reportes')
 
         if os.path.exists(report_profile_path):
