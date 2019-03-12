@@ -3,6 +3,9 @@ import os
 from os.path import dirname as up
 import json
 import requests
+import pyexcel as pe
+from os.path import join
+import pandas as pd
 
 import docx
 from datetime import datetime
@@ -13,12 +16,18 @@ class GenerateReportWidget(widgets.VBox):
         report_profile_path = os.path.join(home_dir,'.profile','report_profile.json')
         model_path = os.path.join(home_dir,'.lib','models','modelo_poa.docx')
         out_path = os.path.join(home_dir,'datos','reportes')
+        data_path = join(os.environ['USERPROFILE'],'aapslab','datos')
 
         if os.path.exists(report_profile_path):
             with open(report_profile_path,'r') as f:
                 report_profile_json = json.load(f)
         else:
             report_profile_json = {}
+
+        book = pe.get_book(file_name=join(data_path,'poas_coop.xlsx'))
+        poas_df = pd.concat([pd.read_excel(join(data_path,'poas_coop.xlsx'), sheet_name=sn) for sn in ['general','ingresos','gastos','inversiones']], axis=1)
+
+        epsa_list = list(poas_df.epsa)
 
         report_number = widgets.BoundedIntText(
             value= report_profile_json.get('last_report_num',0) + 1,
@@ -64,6 +73,31 @@ class GenerateReportWidget(widgets.VBox):
             tooltip='Generar Reporte',
             icon='save',
         ) 
+
+        epsa_dropdown = widgets.Dropdown(
+            options=epsa_list,
+            value=None,
+            description='EPSA:',
+            disabled=False,
+            layout = widgets.Layout(width='50%'),
+        )
+
+        year_dropdown = widgets.Dropdown(
+            options=[],
+            value=None,
+            description='Año:',
+            disabled=False,
+            layout = widgets.Layout(display='none', width='50%'),
+        )
+
+        order_dropdown = widgets.Dropdown(
+            options=[],
+            value=None,
+            description='Orden (reprog.):',
+            disabled=False,
+            layout = widgets.Layout(display='none', width='50%'),
+            style={'description_width': 'initial'},
+        )
 
         help_html = widgets.HTML()
 
@@ -127,11 +161,35 @@ class GenerateReportWidget(widgets.VBox):
             except Exception as e:
                 help_html.value = f"<font color='red'>{str(e)}</font>"
 
+        def on_epsa_dropdown_change(change):
+            try:
+                years = list(poas_df[poas_df.epsa == change['new']].year)
+                year_dropdown.options = years
+                year_dropdown.value = years[0]
+                year_dropdown.layout.display = None
+            except Exception as e:
+                help_html.value = f"<font color='red'>{str(e)}</font>"
+
+        def on_year_dropdown_change(change):
+            try:
+                orders = list(poas_df[(poas_df.epsa == epsa_dropdown.value) & (poas_df.year == change['new'])].order)
+                order_dropdown.options = orders
+                order_dropdown.value = orders[0] if orders else None
+                order_dropdown.layout.display = None
+            except Exception as e:
+                help_html.value = f"<font color='red'>{str(e)}</font>"
+
         generate_button.on_click(on_generate_button_click)
         save_profile_button.on_click(on_save_profile_button_click)
+        epsa_dropdown.observe(on_epsa_dropdown_change, names='value')
+        year_dropdown.observe(on_year_dropdown_change, names='value')
         
-        accordion = widgets.Accordion([widgets.VBox([name_text, qualification_type, specialty_text, report_number,])])
+        accordion = widgets.Accordion([
+            widgets.VBox([name_text, qualification_type, specialty_text, report_number,]),
+            widgets.VBox([epsa_dropdown, year_dropdown, order_dropdown]),
+        ])
         accordion.set_title(0, 'Datos Generales')
+        accordion.set_title(1,'Datos POA')
         accordion.selected_index = None
 
         super().__init__(children=[accordion,widgets.HBox([generate_button,save_profile_button]),help_html], **kwargs)
