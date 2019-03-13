@@ -122,7 +122,7 @@ class GenerateReportWidget(widgets.VBox):
                 epsa = epsa_dropdown.value
                 year = year_dropdown.value
                 order = order_dropdown.value
-                
+
                 if os.path.exists(model_path):
                     doc = docx.Document(model_path)
                 else:
@@ -133,28 +133,50 @@ class GenerateReportWidget(widgets.VBox):
 
                 prof = qualification_type.value
                 denom = prof_name_to_denom[prof]
-                
+
                 # General Info
 
                 col = doc.tables[0].columns[2]
                 col.cells[2].paragraphs[3].text = f'{denom} {name_text.value}'.title()
                 col.cells[2].paragraphs[4].text = f'{prof} {specialty_text.value}'.upper()
                 col.cells[5].paragraphs[0].text = f'La Paz, {now.day} de {month_num_to_name[now.month]} de {now.year}'
-                
+
                 # Ingresos
-                income_cols = ['in_op_ap','in_op_alc','in_op_alc_pozo','in_op_otros','in_financieros','in_no_op_otros']
+                income_cols = list(pd.read_excel(join(data_path,'poas_coop.xlsx'), sheet_name='ingresos'))
                 income_data = [poas_df[(poas_df.epsa==epsa)&(poas_df.year==year)&(poas_df.order==order)][col].iloc[0] for col in income_cols]
-                
+
                 for i,val in zip([3,4,6,7,9,10],income_data):
                     doc.tables[4].columns[1].cells[i].text = "{:,.2f}".format(val) 
-                    
+
                 doc.tables[4].columns[1].cells[2].text = "{:,.2f}".format(income_data[0] + income_data[1])
                 doc.tables[4].columns[1].cells[5].text = "{:,.2f}".format(income_data[2] + income_data[3])
                 doc.tables[4].columns[1].cells[8].text = "{:,.2f}".format(income_data[4] + income_data[5])
                 doc.tables[4].columns[1].cells[1].text = "{:,.2f}".format(sum([income_data[i] for i in range(4)]))
                 doc.tables[4].columns[1].cells[0].text = "{:,.2f}".format(sum(income_data))
-                    
-                if not os.path.exists(out_path):
+
+                # Gastos
+
+                expenses_cols = list(pd.read_excel(join(data_path,'poas_coop.xlsx'), sheet_name='gastos'))
+                expenses_data = [poas_df[(poas_df.epsa==epsa)&(poas_df.year==year)&(poas_df.order==order)][col].iloc[0] for col in expenses_cols]
+
+                for i,val in zip([2,3,5,6,7],expenses_data):
+                    doc.tables[5].columns[1].cells[i].text = "{:,.2f}".format(val) 
+
+                doc.tables[5].columns[1].cells[1].text = "{:,.2f}".format(expenses_data[0] + expenses_data[1])
+                doc.tables[5].columns[1].cells[4].text = "{:,.2f}".format(expenses_data[2] + expenses_data[3] + expenses_data[4])
+                doc.tables[5].columns[1].cells[0].text = "{:,.2f}".format(sum(expenses_data))
+
+                # Inversiones
+
+                investments_cols = list(pd.read_excel(join(data_path,'poas_coop.xlsx'), sheet_name='inversiones'))
+                investments_data = [poas_df[(poas_df.epsa==epsa)&(poas_df.year==year)&(poas_df.order==order)][col].iloc[0] for col in investments_cols]
+
+                for i,val in zip([1,2,3,4,5],investments_data):
+                    doc.tables[6].columns[1].cells[i].text = "{:,.2f}".format(val) 
+
+                doc.tables[6].columns[1].cells[0].text = "{:,.2f}".format(sum(investments_data)) 
+
+                if not exists(out_path):
                     os.makedirs(out_path)
 
                 doc.save(os.path.join(out_path,f'reporte_poa_{epsa}_{year}_{order}_{now.hour}_{now.minute}.docx'))
@@ -222,9 +244,6 @@ class GenerateReportWidget(widgets.VBox):
         accordion.selected_index = None
 
         super().__init__(children=[accordion,widgets.HBox([generate_button,save_profile_button]),help_html], **kwargs)
-        
-
-
         
 
 class LoadDataWidget(widgets.VBox):
