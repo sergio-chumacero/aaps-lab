@@ -124,6 +124,14 @@ class GenerateReportWidget(widgets.VBox):
             layout = widgets.Layout(display='none', width='50%'),
             style={'description_width': 'initial'},
         )
+        
+        generate_random_button = widgets.Button(
+            description='Generar Aleatorio',
+            button_style='info',
+            tooltip='Generar Reporte con datos aleatorios',
+            icon='file-text',
+            layout= widgets.Layout(display='none')
+        ) 
 
         help_html = widgets.HTML()
 
@@ -140,7 +148,7 @@ class GenerateReportWidget(widgets.VBox):
             order = order_dropdown.value
 
             if not epsa_toggle.value:
-                help_html.value = '<font color="red">Porfavor escoge entre Cooperativas o EPSAs municipales.</font>'
+                help_html.value = '<font color="red">Porfavor escoge el tipo de reporte (cooperativa o EPSA municipal).</font>'
                 return
 
             if epsa_toggle.value == 'Cooperativas':
@@ -184,6 +192,7 @@ class GenerateReportWidget(widgets.VBox):
             col.cells[2].paragraphs[4].text = f'{prof} {specialty_text.value}'.upper()
             col.cells[5].paragraphs[0].text = f'La Paz, {now.day} de {month_num_to_name[now.month]} de {now.year}'
 
+            
             # Ingresos
             income_cols = list(pd.read_excel(xlsx_path, sheet_name='ingresos'))
             income_data = [df[(df.epsa==epsa)&(df.year==year)&(df.order==order)][col].iloc[0] for col in income_cols]
@@ -198,7 +207,6 @@ class GenerateReportWidget(widgets.VBox):
             doc.tables[4].columns[1].cells[0].text = "{:,.2f}".format(sum(income_data))
 
             # Gastos
-
             expenses_cols = list(pd.read_excel(xlsx_path, sheet_name='gastos'))
             expenses_data = [df[(df.epsa==epsa)&(df.year==year)&(df.order==order)][col].iloc[0] for col in expenses_cols]
 
@@ -235,13 +243,13 @@ class GenerateReportWidget(widgets.VBox):
             help_html.value = 'Informe generado y guardado en la carpeta <code>datos/reportes</code>!</br>Puedes descargar los reportes desde el navegador (<a href="http://localhost:8888/tree/datos/reportes"><font color="blue">LINK</font></a>) o acceder a ellos directamente a la carpeta en tu ordenador.'
 
             if os.path.exists(profile_path):
-                with open(report_profile_path,'r') as f:
+                with open(profile_path,'r') as f:
                     profile_json = json.load(f)
 
                 profile_json['last_report_num'] = report_number.value
 
                 with open(profile_path,'w') as f:
-                    json.dump(report_profile_json,f)
+                    json.dump(profile_json,f)
 
         def on_save_profile_button_click(b):
             try:
@@ -288,33 +296,91 @@ class GenerateReportWidget(widgets.VBox):
 
         def on_epsa_toggle_change(change):
             if change['new'] == 'Cooperativas':
-                if exists(coop_path):
+                if exists(coop_path) and not coop_df.empty:
+                    generate_button.disabled = False
+                    generate_random_button.layout.display = 'none'
                     book = coop_book
                     df = coop_df
                 else:
-                    help_html.value = "<font color='red'>Parece que no tienes datos de Cooperativas. Trata de descargar estos datos desde la aplicación 'Descargar Datos'.</font>"
-                    return1
+                    help_html.value = "<font color='red'>Parece que no tienes datos de Cooperativas. Trata de descargar estos datos desde la aplicación 'Descargar Datos'. También puedes generar un reporte con datos aleatorios.</font>"
+                    generate_button.disabled = True
+                    epsa_dropdown.layout.display='none'
+                    year_dropdown.layout.display='none'
+                    order_dropdown.layout.display='none'
+                    generate_random_button.layout.display = None
+                    return
             
             if change['new'] == 'Municipales':
-                if exists(muni_path):
+                if exists(muni_path) and not muni_df.empty:
+                    generate_button.disabled = False
+                    generate_random_button.layout.display = 'none'
                     book = muni_book
                     df = muni_df
                 else:
-                    help_html.value = "<font color='red'>Parece que no tienes datos de EPSAS Municipales. Trata de descargar estos datos desde la aplicación 'Descargar Datos'.</font>"
+                    help_html.value = "<font color='red'>Parece que no tienes datos de EPSAS Municipales. Trata de descargar estos datos desde la aplicación 'Descargar Datos'. También puedes generar un reporte con datos aleatorios.</font>"
+                    generate_button.disabled = True
+                    epsa_dropdown.layout.display='none'
+                    year_dropdown.layout.display='none'
+                    order_dropdown.layout.display='none'
+                    generate_random_button.layout.display = None
                     return
                 
             epsa_dropdown.options = list(df.epsa) 
             epsa_dropdown.layout.display = None
+            year_dropdown.layout.display = None
+            order_dropdown.layout.display = None
+                
+        def on_generate_random_click(b):
+            if epsa_toggle.value == 'Cooperativas':
+                if exists(join(models_path,'modelo_poa_coop.docx')):
+                    doc = docx.Document(join(models_path,'modelo_poa_coop.docx'))
+                else:
+                    help_html.value = '<font color="red">No se encontró el modelo base de POA de cooperativas.</font>'
+                    return
+            if epsa_toggle.value == 'Municipales':
+                if exists(join(models_path,'modelo_poa_muni.docx')):
+                    doc = docx.Document(join(models_path,'modelo_poa_muni.docx'))
+                else:
+                    help_html.value = '<font color="red">No se encontró el modelo base de POA de EPSAs municipales.</font>'
+                    return
+                
+            doc.paragraphs[3].text = f'AAPS/DER/INF/{report_number.value:03d}/2019'
+
+            prof = qualification_type.value
+            denom = prof_name_to_denom[prof]
+
+            # General Info
+            col = doc.tables[0].columns[2]
+            col.cells[2].paragraphs[3].text = f'{denom} {name_text.value}'.title()
+            col.cells[2].paragraphs[4].text = f'{prof} {specialty_text.value}'.upper()
+            col.cells[5].paragraphs[0].text = f'La Paz, {now.day} de {month_num_to_name[now.month]} de {now.year}'
+            
+            if not exists(out_path):
+                os.makedirs(out_path)
+
+            doc.save(join(out_path,f'reporte_poa_{now.hour}_{now.minute}.docx'))
+
+            help_html.value = 'Informe generado y guardado en la carpeta <code>datos/reportes</code>!</br>Puedes descargar los reportes desde el navegador (<a href="http://localhost:8888/tree/datos/reportes"><font color="blue">LINK</font></a>) o acceder a ellos directamente a la carpeta en tu ordenador.'
+
+            if os.path.exists(profile_path):
+                with open(profile_path,'r') as f:
+                    profile_json = json.load(f)
+
+                profile_json['last_report_num'] = report_number.value
+
+                with open(profile_path,'w') as f:
+                    json.dump(profile_json,f)
                 
         generate_button.on_click(on_generate_button_click)
         save_profile_button.on_click(on_save_profile_button_click)
         epsa_dropdown.observe(on_epsa_dropdown_change, names='value')
         year_dropdown.observe(on_year_dropdown_change, names='value')
         epsa_toggle.observe(on_epsa_toggle_change, names='value')
+        generate_random_button.on_click(on_generate_random_click)
         
         accordion = widgets.Accordion([
             widgets.VBox([name_text, qualification_type, specialty_text, report_number,save_profile_button]),
-            widgets.VBox([epsa_toggle, epsa_dropdown, year_dropdown, order_dropdown]),
+            widgets.VBox([epsa_toggle, epsa_dropdown, year_dropdown, order_dropdown, generate_random_button]),
         ])
         accordion.set_title(0, 'Datos Generales')
         accordion.set_title(1,'Datos POA')
