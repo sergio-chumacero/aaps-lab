@@ -554,7 +554,11 @@ class LoadDataWidget(widgets.VBox):
 
         profile_json = None
 
-        local_datasets = intersection(os.listdir(data_path),available_datasets)
+        if exists(data_path):
+            local_datasets = intersection(os.listdir(data_path),available_datasets)
+        else:
+            local_datasets = []
+
         external_datasets = difference(available_datasets,local_datasets)
 
         general_cols = ['epsa','year','order']
@@ -724,32 +728,33 @@ class LoadDataWidget(widgets.VBox):
             set_help_html(username_widget.value, password_widget.value, change['new'])
 
         def on_generate_token_button_click(b):
-            try:
-                username = username_widget.value
-                password = password_widget.value
-                r = requests.post(f'{server_base_url}/api-token-auth/', json={'username':username, 'password':password})
 
-                if 'token' in r.json().keys():
-                    with open(profile_path,'r') as f:
-                        profile_json = json.load(f)
+            username = username_widget.value
+            password = password_widget.value
+            r = requests.post(f'{server_base_url}/api-token-auth/', json={'username':username, 'password':password})
 
-                    profile_json['token'] = r.json()['token']
+            if 'token' in r.json().keys():
+                with open(profile_path,'r') as f:
+                    profile_json_h = json.load(f)
 
-                    with open(profile_path,'w') as f:
-                        json.dump(profile_json,f)
+                profile_json_h['token'] = r.json()['token']
 
-                    login_widget.layout.display = 'none'
-                    help_html0.value = '<font color="green">Las credenciales son válidas!</font></br><font color="green">Token guardado. Todo listo para descargar datos.</font>'
-                    download_help.value = '<font color="green">Las credenciales son válidas!</font><font color="green">Token guardado. Todo listo para descargar datos.</font></br><div style="margin-bottom:20pt"><font size=3>Selecciona los conjuntos de datos que serán actualizado y/o descargados. Mantén presionado CTRL para seleccionar múltiples conjuntos.</font></div>'
-                    update_token_button.layout.display = None
-                    download_data_widget.layout.display = None
-                    load_data_accordion.selected_index = 1
-                    download_button.disabled = False
+                with open(profile_path,'w') as f:
+                    json.dump(profile_json_h,f)
+
+                profile_json = profile_json_h
+
+                login_widget.layout.display = 'none'
+                help_html0.value = '<font color="green">Las credenciales son válidas!</font></br><font color="green">Token guardado. Todo listo para descargar datos.</font>'
+                download_help.value = '<font color="green">Las credenciales son válidas!</font><font color="green">Token guardado. Todo listo para descargar datos.</font></br><div style="margin-bottom:20pt"><font size=3>Selecciona los conjuntos de datos que serán actualizado y/o descargados. Mantén presionado CTRL para seleccionar múltiples conjuntos.</font></div>'
+                update_token_button.layout.display = None
+                download_data_widget.layout.display = None
+                load_data_accordion.selected_index = 1
+                download_button.disabled = False
                     
-                else:
-                    help_html.value = "<font color='red'>Las credenciales proporcionadas no son válidas.</font> Verifica tus credenciales. Si el problema persiste, trata de ingresar a través de la <a href='https://aaps-data.appspot.com/admin/'>aplicación administrativa</a>. Si no puedes ingresar a través de esa página tampoco, contacta al administrador/administradora."
-            except Exception as e:
-                help_html.value = str(e)
+            else:
+                help_html.value = "<font color='red'>Las credenciales proporcionadas no son válidas.</font> Verifica tus credenciales. Si el problema persiste, trata de ingresar a través de la <a href='https://aaps-data.appspot.com/admin/'>aplicación administrativa</a>. Si no puedes ingresar a través de esa página tampoco, contacta al administrador/administradora."
+
 
         def on_update_token_button_click(b):
             help_html0.value = 'Para actualizar tus credenciales, porfavor ingresa tu nombre de usuario y contraseña.'
@@ -781,7 +786,9 @@ class LoadDataWidget(widgets.VBox):
 
         help_json = {}
         def on_download_button_click(b):
-            token = profile_json['token']
+            with open(profile_path,'r') as f:
+                token = json.load(f)['token']
+            
             headers = dict(Authorization=f'Token {token}')
             selected_datasets = local_datasets_select.value + external_datasets_select.value
 
@@ -822,6 +829,10 @@ class LoadDataWidget(widgets.VBox):
                         else:
                             coop_df[cols_list].to_excel(coop_writer,sn,index=False)
                             muni_df[cols_list].to_excel(muni_writer,sn,index=False)
+
+                    
+                    if not exists(data_path):
+                        os.makedirs(data_path)
 
                     coop_writer.save()
                     muni_writer.save()
