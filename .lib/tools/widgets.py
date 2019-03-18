@@ -5,6 +5,7 @@ import json
 import requests
 import qgrid
 import pandas as pd
+from pandas import ExcelWriter
 from datetime import datetime
 import docx
 
@@ -24,6 +25,10 @@ coop_doc_path = join(models_path,'modelo_poa_coop.docx')
 muni_doc_path = join(models_path,'modelo_poa_muni.docx')
 
 server_base_url = 'http://localhost:8000'
+# server_base_url = 'http://200.87.123.68'
+# server_base_url = 'http://aaps-lab.ml'
+
+available_datasets = ['poas_muni.xlsx', 'poas_coop.xlsx']
 
 class GenerateReportWidget(widgets.VBox):
     def __init__(self, **kwargs):
@@ -56,7 +61,7 @@ class GenerateReportWidget(widgets.VBox):
             gastos_empleados_permanentes='EMPLEADOS PERMANENTES',
             gastos_empleados_no_permanentes='EMPLEADOS NO PERMANENTES',
             gastos_prevision_social='PREVISIÓN SOCIAL',
-            gastos_servicios_no_personales='SERVICIOS NO PERSONALES',
+            gastos_servicio_no_personales='SERVICIOS NO PERSONALES',
             gastos_materiales='MATERIALES Y SUMINISTROS',
             gastos_activos='ACTIVOS REALES',
             gastos_deuda_publica='SERVICIOS DE LA DEUDA PÚBLICA',
@@ -145,7 +150,7 @@ class GenerateReportWidget(widgets.VBox):
             button_style='info',
             tooltip='Generar Reporte con datos aleatorios',
             icon='file-text',
-            layout= widgets.Layout(display='none')
+            layout=widgets.Layout(width='300px',height='50px',font_size='20px', display='none'),
         ) 
         date_picker = widgets.DatePicker(
             value = datetime.now(),
@@ -204,13 +209,13 @@ class GenerateReportWidget(widgets.VBox):
 
         def build_intro():
             num = report_number.value
-            prof = qualification_type.value
+            prof = prof_name_to_denom[qualification_type.value] if qualification_type.value else ''
             name = name_text.value
             specialty = specialty_text.value
             date = date_picker.value
             return f'''<div style="background-color: #ddffff;border-left: 6px solid #2196F3; padding: 0.01em 16px">
             INFORME AAPS/DER/INF/{num:03d}/{date.year}</br>
-            {prof_name_to_denom[prof]} {name.title()}</br>
+            {prof} {name.title()}</br>
             PROFESIONAL {prof.upper()} {specialty.upper()}</br>
             La Paz, {date.day} de {month_num_to_name[date.month]} de {date.year}
             </div>'''
@@ -224,6 +229,8 @@ class GenerateReportWidget(widgets.VBox):
                     help_html.value = ''
                     help_grid.df = pd.read_excel(coop_xl_path, sheet_name='general')
                     epsa_dropdown.options = list(help_grid.df.epsa)
+                    generate_button.disabled = False
+                    generate_random_button.layout.display = 'none'
                 else:
                     help_grid.df = pd.DataFrame()
                     epsa_dropdown.options = []
@@ -234,6 +241,8 @@ class GenerateReportWidget(widgets.VBox):
                     order_dropdown.layout.display = 'none'
                     for grid in grids:
                         grid.df = pd.DataFrame()
+                    generate_button.disabled = True
+                    generate_random_button.layout.display = None
                     help_html.value = "<font color='red'>Parece que no tienes datos de Cooperativas. Trata de descargar estos datos desde la aplicación 'Descargar Datos'. También puedes generar un reporte con datos aleatorios.</font>"
 
             if change['new'] == 'Municipales':
@@ -241,6 +250,8 @@ class GenerateReportWidget(widgets.VBox):
                     help_html.value = ''
                     help_grid.df = pd.read_excel(muni_xl_path, sheet_name='general')
                     epsa_dropdown.options = list(help_grid.df.epsa)
+                    generate_button.disabled = False
+                    generate_random_button.layout.dislpay = 'none'
                 else:
                     help_grid.df = pd.DataFrame()
                     epsa_dropdown.options = []
@@ -251,6 +262,8 @@ class GenerateReportWidget(widgets.VBox):
                     order_dropdown.layout.display = 'none'
                     for grid in grids:
                         grid.df = pd.DataFrame()
+                    generate_button.disabled = True
+                    generate_random_button.layout.display = None
                     help_html.value = "<font color='red'>Parece que no tienes datos de Cooperativas. Trata de descargar estos datos desde la aplicación 'Descargar Datos'. También puedes generar un reporte con datos aleatorios.</font>"
 
         def on_epsa_dropdown_change(change):
@@ -330,7 +343,7 @@ class GenerateReportWidget(widgets.VBox):
 
                 intro_help_html.value = 'Perfil guardado!'
 
-        def on_generate_button_click(b):
+        def on_generate_button_click(b,random=False):
             if not type_toggle.value:
                 help_html.value = '<font color="red">Porfavor escoge el tipo de reporte (cooperativa o EPSA municipal).</font>'
                 return
@@ -349,7 +362,8 @@ class GenerateReportWidget(widgets.VBox):
                 is_muni = True
 
             doc = docx.Document(doc_path)
-            income_data, expenses_data, investments_data = [list(grids[i+1].get_changed_df()['Valor (Bs.)'].apply(text_to_float)) for i in range(3)]
+            if not random:
+                income_data, expenses_data, investments_data = [list(grids[i+1].get_changed_df()['Valor (Bs.)'].apply(text_to_float)) for i in range(3)]
 
             # Intro
             prof = qualification_type.value
@@ -362,39 +376,40 @@ class GenerateReportWidget(widgets.VBox):
             col.cells[2].paragraphs[4].text = f'{prof} {specialty_text.value}'.upper()
             col.cells[5].paragraphs[0].text = f'La Paz, {date.day} de {month_num_to_name[date.month]} de {date.year}'
 
-            # Ingresos
+            if not random:
+                # Ingresos
 
-            for i,val in zip([3,4,6,7,9,10],income_data):
-                doc.tables[4].columns[1].cells[i].text = float_to_text(val)
+                for i,val in zip([3,4,6,7,9,10],income_data):
+                    doc.tables[4].columns[1].cells[i].text = float_to_text(val)
 
-            doc.tables[4].columns[1].cells[2].text = float_to_text(income_data[0] + income_data[1])
-            doc.tables[4].columns[1].cells[5].text = float_to_text(income_data[2] + income_data[3])
-            doc.tables[4].columns[1].cells[8].text = float_to_text(income_data[4] + income_data[5])
-            doc.tables[4].columns[1].cells[1].text = float_to_text(sum([income_data[i] for i in range(4)]))
-            doc.tables[4].columns[1].cells[0].text = float_to_text(sum(income_data))
+                doc.tables[4].columns[1].cells[2].text = float_to_text(income_data[0] + income_data[1])
+                doc.tables[4].columns[1].cells[5].text = float_to_text(income_data[2] + income_data[3])
+                doc.tables[4].columns[1].cells[8].text = float_to_text(income_data[4] + income_data[5])
+                doc.tables[4].columns[1].cells[1].text = float_to_text(sum([income_data[i] for i in range(4)]))
+                doc.tables[4].columns[1].cells[0].text = float_to_text(sum(income_data))
 
-            # Gastos
-            if is_coop:
-                for i,val in zip([2,3,5,6,7],expenses_data):
-                    doc.tables[5].columns[1].cells[i].text = float_to_text(val)
+                # Gastos
+                if is_coop:
+                    for i,val in zip([2,3,5,6,7],expenses_data):
+                        doc.tables[5].columns[1].cells[i].text = float_to_text(val)
 
-                doc.tables[5].columns[1].cells[1].text = float_to_text(expenses_data[0] + expenses_data[1])
-                doc.tables[5].columns[1].cells[4].text = float_to_text(expenses_data[2] + expenses_data[3] + expenses_data[4])
-                doc.tables[5].columns[1].cells[0].text = float_to_text(sum(expenses_data))
+                    doc.tables[5].columns[1].cells[1].text = float_to_text(expenses_data[0] + expenses_data[1])
+                    doc.tables[5].columns[1].cells[4].text = float_to_text(expenses_data[2] + expenses_data[3] + expenses_data[4])
+                    doc.tables[5].columns[1].cells[0].text = float_to_text(sum(expenses_data))
 
-            if is_muni:
-                for i,val in zip([j+2 for j in range(10)],expenses_data):
-                    doc.tables[5].columns[1].cells[i].text = float_to_text(val) 
+                if is_muni:
+                    for i,val in zip([j+2 for j in range(10)],expenses_data):
+                        doc.tables[5].columns[1].cells[i].text = float_to_text(val) 
 
-                doc.tables[5].columns[1].cells[1].text = float_to_text(expenses_data[0] + expenses_data[1] + expenses_data[2])
-                doc.tables[5].columns[1].cells[0].text = float_to_text(sum(expenses_data))
+                    doc.tables[5].columns[1].cells[1].text = float_to_text(expenses_data[0] + expenses_data[1] + expenses_data[2])
+                    doc.tables[5].columns[1].cells[0].text = float_to_text(sum(expenses_data))
 
-            # Inversiones
+                # Inversiones
 
-            for i,val in zip([1,2,3,4,5],investments_data):
-                doc.tables[6].columns[1].cells[i].text = float_to_text(val)
+                for i,val in zip([1,2,3,4,5],investments_data):
+                    doc.tables[6].columns[1].cells[i].text = float_to_text(val)
 
-            doc.tables[6].columns[1].cells[0].text = float_to_text(sum(investments_data)) 
+                doc.tables[6].columns[1].cells[0].text = float_to_text(sum(investments_data)) 
 
             # Finish
             if not exists(out_path):
@@ -403,15 +418,16 @@ class GenerateReportWidget(widgets.VBox):
             doc.save(join(out_path,f'reporte_poa.docx'))
 
             help_html.value = '''
-            Informe generado y guardado en la carpeta <a href="http://localhost:8888/tree/datos/reportes"><code>datos/reportes</code></a>!
-            Puedes descargar los reportes desde el navegador (<a href="http://localhost:8888/tree/datos/reportes"><font color="blue">LINK</font></a>)
+            Informe generado y guardado en la carpeta <a href="http://localhost:8888/tree/datos/reportes" target="_blank"><code>datos/reportes</code></a>!
+            Puedes descargar los reportes desde el navegador (<a href="http://localhost:8888/tree/datos/reportes" target="_blank"><font color="blue">LINK</font></a>)
             o acceder a ellos directamente a la carpeta en tu ordenador.'
             '''
 
-            if profile_json:
-                profile_json['last_report_num'] = report_number.value
-                with open(profile_path,'w') as f:
-                    json.dump(profile_json,f)
+            if not random:
+                if profile_json:
+                    profile_json['last_report_num'] = report_number.value
+                    with open(profile_path,'w') as f:
+                        json.dump(profile_json,f)
 
         format_help ='''<font color="red">
             El valor editado no se encuentra en un formato de número reconocible.
@@ -472,6 +488,9 @@ class GenerateReportWidget(widgets.VBox):
                 if idx in idxs:
                     text_widget.value = df_total
 
+        def on_generate_random_button_click(b):
+            on_generate_button_click(b,random=True)
+            
 
         type_toggle.observe(on_type_toggle_change, names='value')
         epsa_dropdown.observe(on_epsa_dropdown_change, names='value')
@@ -484,6 +503,7 @@ class GenerateReportWidget(widgets.VBox):
         date_picker.observe(on_date_picker_change,names='value')
         save_profile_button.on_click(on_save_profile_button_click)
         generate_button.on_click(on_generate_button_click)
+        generate_random_button.on_click(on_generate_random_button_click)
 
         qgrid.on('cell_edited',on_cell_edited)
 
@@ -509,19 +529,63 @@ class GenerateReportWidget(widgets.VBox):
 
         accordion = widgets.Accordion([
             widgets.HBox([widgets.VBox([name_text, qualification_type, specialty_text, report_number,date_picker,widgets.HBox([save_profile_button,intro_help_html,]),]),intro_html]),
-            widgets.VBox([type_toggle, epsa_dropdown, year_dropdown, order_dropdown, generate_random_button]),
+            widgets.VBox([type_toggle, epsa_dropdown, year_dropdown, order_dropdown,]),
             widgets.HTML(value=table_instructions),
         ])
         accordion.set_title(0, '1. Datos Generales')
         accordion.set_title(1, '2. Datos POA')
         accordion.set_title(2, '3. Vista Previa / Editar Datos')
         accordion.selected_index = None
-        
-        super().__init__(children=[accordion,tab,generate_button,help_html,], **kwargs)
+
+        super().__init__(children=[accordion,tab,widgets.HBox([generate_button,generate_random_button]),help_html,], **kwargs)
         
 class LoadDataWidget(widgets.VBox):   
     def __init__(self, **kwargs):
         
+        def intersection(a,b):
+            return list(set(a)&set(b))
+        def difference(a,b):
+            return list(set(a)-set(b))
+
+        dataset_file_to_name = {
+            'poas_coop.xlsx': 'POAS COOPERATIVAS',
+            'poas_muni.xlsx': 'POAS EPSAS MUNICIPALES',
+        }
+
+        profile_json = None
+
+        local_datasets = intersection(os.listdir(data_path),available_datasets)
+        external_datasets = difference(available_datasets,local_datasets)
+
+        general_cols = ['epsa','year','order']
+        income_cols = ['in_op_ap','in_op_alc','in_op_alc_pozo','in_op_otros','in_financieros','in_no_op_otros']
+        coop_expenses_cols = [
+            'costos_operacion',
+            'costos_mantenimiento',
+            'gastos_administrativos',
+            'gastos_comerciales',
+            'gastos_financieros',
+        ]
+        muni_expenses_cols = [
+            'gastos_empleados_permanentes',
+            'gastos_empleados_no_permanentes',
+            'gastos_prevision_social',
+            'gastos_servicio_no_personales',
+            'gastos_materiales',
+            'gastos_activos',
+            'gastos_deuda_publica',
+            'gastos_transferencias',
+            'gastos_impuesto',
+            'gastos_otros',
+        ]
+        investments_cols = [
+            'inv_infraestructura_ap',
+            'inv_infraestructura_alc',
+            'inv_equipo',
+            'inv_diseno_estudio',
+            'inv_otros',
+        ]
+
         help_html0 = widgets.HTML()
 
         username_widget = widgets.Text(
@@ -536,7 +600,7 @@ class LoadDataWidget(widgets.VBox):
         )
 
         generate_token_button = widgets.Button(
-            description='Generar Token!',
+            description='Generar Credenciales!',
             button_style='success',
             disabled=True,
             tooltip='Actualiza los datos locales del sistema AAPS-API!',
@@ -554,31 +618,84 @@ class LoadDataWidget(widgets.VBox):
         )
 
         update_token_button = widgets.Button(
-            description='Actualizar Token',
+            description='Actualizar Credenciales',
         #     button_style='info',
-            tooltip='Actualiza el token de autorización',
-            layout=widgets.Layout(display='none')
+            tooltip='Actualiza los credenciales de autorización',
+            layout=widgets.Layout(display='none',width='250px')
         )
 
         update_button = widgets.Button(
             button_style='info',
-            tooltip='Actualiza el paso 0',
+            tooltip='Actualizar el paso 1.',
             icon='refresh',
-            layout=widgets.Layout(width='50px')
+            layout=widgets.Layout(width='50px'),
         )
 
-        help_html = widgets.HTML()
-        help_html.layout.width = '500px'
+        local_datasets_select = widgets.SelectMultiple(
+            options=[dataset_file_to_name[x] for x in local_datasets],
+            value=[],
+            rows=len(local_datasets)+2,
+            description='Conjuntos Locales:',
+            disabled=False,
+            layout=widgets.Layout(width='100%'),
+            style={'description_width': 'initial'},
+        )
 
-        login_widget = widgets.HBox([
+        external_datasets_select = widgets.SelectMultiple(
+            options=[dataset_file_to_name[x] for x in external_datasets],
+            value=[],
+            description='Conjuntos Externos:',
+            disabled=False,
+            rows=len(external_datasets)+2,
+            layout=widgets.Layout(width='100%'),
+            style={'description_width': 'initial'},
+        )
+        download_button = widgets.Button(
+            description='Actualizar/Descargar Datos',
+            button_style='success',
+            tooltip='Generar Reporte',
+            icon='download',
+            disabled=True,
+            layout=widgets.Layout(width='300px',height='50px',font_size='20px'),
+        )
+
+        def build_overview():
+            lds = local_datasets_select.value
+            eds = external_datasets_select.value
+            
+            lds_enum =  '<ol>' + ''.join([f'<li>{x}</li>' for x in lds]) + '</ol>'
+            eds_enum =  '<ol>' + ''.join([f'<li>{x}</li>' for x in eds]) + '</ol>'
+            
+            update_txt = '' if lds == () else 'Estos conjuntos de datos serán actualizados:</br>'
+            download_txt = '' if eds == () else 'Estos conjuntos de datos nuevos serán descargados:</br>'
+            
+            overview_html.value=f'''<div style="background-color: #ddffff;border-left: 6px solid #2196F3; padding: 0.01em 16px">
+            {update_txt}
+            {lds_enum}
+            {download_txt}
+            {eds_enum}
+            </div>'''
+
+        overview_html = widgets.HTML(layout=widgets.Layout(width='50%'))
+        build_overview()
+
+        help_html = widgets.HTML(layout=widgets.Layout(width='500px'))
+        download_help = widgets.HTML()
+        button_help = widgets.HTML()
+
+        login_widget = widgets.HBox(children=[
             widgets.VBox([
                 username_widget,
                 widgets.HBox([password_widget,show_password_button,]),
                 widgets.HBox([generate_token_button,update_button]),
             ]),
             help_html,
-        ])
-        login_widget.layout.display='none'
+        ], layout=widgets.Layout(display='none'))
+
+        download_data_widget = widgets.VBox(children=[
+            widgets.HBox([local_datasets_select,external_datasets_select,]),
+            overview_html,
+        ], layout=widgets.Layout(display='none'))
 
         def set_help_html(username, password, show_pass):
             user_label = 'Nombre de Usuario:' if username != '' else ''
@@ -615,21 +732,27 @@ class LoadDataWidget(widgets.VBox):
                 if 'token' in r.json().keys():
                     with open(profile_path,'r') as f:
                         profile_json = json.load(f)
-                    
+
                     profile_json['token'] = r.json()['token']
-                    
+
                     with open(profile_path,'w') as f:
                         json.dump(profile_json,f)
-                    
+
                     login_widget.layout.display = 'none'
-                    help_html0.value = '</br><font color="green">Las credenciales son válidas!</font></br><font color="green">Token guardado. Todo listo para cargar datos.</font>'
+                    help_html0.value = '<font color="green">Las credenciales son válidas!</font></br><font color="green">Token guardado. Todo listo para descargar datos.</font>'
+                    download_help.value = '<font color="green">Las credenciales son válidas!</font><font color="green">Token guardado. Todo listo para descargar datos.</font></br><div style="margin-bottom:20pt"><font size=3>Selecciona los conjuntos de datos que serán actualizado y/o descargados. Mantén presionado CTRL para seleccionar múltiples conjuntos.</font></div>'
+                    update_token_button.layout.display = None
+                    download_data_widget.layout.display = None
+                    load_data_accordion.selected_index = 1
+                    download_button.disabled = False
+                    
                 else:
                     help_html.value = "<font color='red'>Las credenciales proporcionadas no son válidas.</font> Verifica tus credenciales. Si el problema persiste, trata de ingresar a través de la <a href='https://aaps-data.appspot.com/admin/'>aplicación administrativa</a>. Si no puedes ingresar a través de esa página tampoco, contacta al administrador/administradora."
             except Exception as e:
                 help_html.value = str(e)
-                
+
         def on_update_token_button_click(b):
-            help_html0.value = ''
+            help_html0.value = 'Para actualizar tus credenciales, porfavor ingresa tu nombre de usuario y contraseña.'
             login_widget.layout.display=None
             update_token_button.layout.display='none'
 
@@ -637,36 +760,109 @@ class LoadDataWidget(widgets.VBox):
             username_widget.value=''
             password_widget.value=''
             login_widget.layout.display='none'
-            
-            with open(profile_path,'r') as f:
-                profile_json = json.load(f)
+
+            if exists(profile_path):
+                with open(profile_path,'r') as f:
+                    profile_json = json.load(f)
+            else:
+                help_html0.value = '<font color="red">No se encontró el archivo de perfil de usuario.</font>'
 
             if not 'token' in profile_json.keys():
-                help_html0.value = "Parece que no cuentas con un token de autorización todavía. Por favor ingresa tus credenciales para generar uno."
+                help_html0.value = "Parece que no cuentas con credenciales de autorización todavía. Por favor ingresa tus credenciales para generar uno."
                 login_widget.layout.display=None
             else:
-                help_html0.value = "<font color='green'>Token de autorización encontrado. Todo listo para cargar datos! Si no puedes cargar datos es posible que tu token este desactualizado.</font>"
+                help_html0.value = "<font color='green'>Credenciales de autorización encontrados. Todo listo para descargar datos! Si no puedes descargar datos es posible que tu token este desactualizado.</font>"
                 update_token_button.layout.display=None
-            
+
+        def on_local_dataset_select_change(change):
+            build_overview()
+        def on_external_dataset_select_change(change):
+            build_overview()
+
+        help_json = {}
+        def on_download_button_click(b):
+            token = profile_json['token']
+            headers = dict(Authorization=f'Token {token}')
+            selected_datasets = local_datasets_select.value + external_datasets_select.value
+
+            if set(['POAS EPSAS MUNICIPALES','POAS COOPERATIVAS']) <= set(selected_datasets):
+                r = requests.get(f'{server_base_url}/api/poas/', headers=headers)
+                response_json = r.json()
+                if 'detail' in response_json:
+                    if response_json['detail'] == 'Token inválido.':
+                        download_help.value = '<font color="red">Credenciales inválidas. Actualiza tus credenciales en el paso 1 y trata de nuevo.</font>'
+                        download_data_widget.layout.display = 'none'
+                else:
+                    coop_writer = ExcelWriter(coop_xl_path)
+                    muni_writer = ExcelWriter(muni_xl_path)
+                    
+                    poas_jsons = dict(coop=[],muni=[])
+                    for poa in response_json:
+                        coop_dict = poa['coop_expense']
+                        muni_dict = poa['muni_expense']
+
+                        for d,en,cm in zip([coop_dict,muni_dict],['coop_expense','muni_expense'],['coop','muni']):
+                            if d:
+                                for k,v in d.items():
+                                    poa[k] = v
+                                poas_jsons[cm].append(poa)
+                            del poa[en]
+                        del poa['modified']
+
+                    coop_df = pd.DataFrame(poas_jsons['coop'])
+                    muni_df = pd.DataFrame(poas_jsons['muni'])
+
+                    cols_lists = [general_cols,income_cols,None,investments_cols]
+                    sheet_names = ['general','ingresos','gastos','inversiones']
+
+                    for cols_list,sn in zip(cols_lists, sheet_names):
+                        if sn == 'gastos':
+                            coop_df[coop_expenses_cols].to_excel(coop_writer,sn,index=False)
+                            muni_df[muni_expenses_cols].to_excel(muni_writer,sn,index=False)
+                        else:
+                            coop_df[cols_list].to_excel(coop_writer,sn,index=False)
+                            muni_df[cols_list].to_excel(muni_writer,sn,index=False)
+
+                    coop_writer.save()
+                    muni_writer.save()
+                    
+                    button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code>datos</code></a> y ahora los puedes usar en las otras aplicaciones!</font>'
+                
         username_widget.observe(on_username_change, names='value')
         password_widget.observe(on_password_change, names='value')
         show_password_button.observe(on_show_pass_change, names='value')
         generate_token_button.on_click(on_generate_token_button_click)
         update_token_button.on_click(on_update_token_button_click)
         update_button.on_click(on_update_button_click)
+        local_datasets_select.observe(on_local_dataset_select_change,names='value')
+        external_datasets_select.observe(on_external_dataset_select_change,names='value')
+        download_button.on_click(on_download_button_click)
 
-        load_data_accordion = widgets.Accordion(children=[widgets.VBox([help_html0,login_widget,update_token_button]),widgets.Button()])
+        load_data_accordion = widgets.Accordion(children=[
+            widgets.VBox([help_html0,login_widget,update_token_button]),
+            widgets.VBox([download_help,download_data_widget,]),
+        ])
         load_data_accordion.set_title(0, '1. Ingreso/Autenticación')
-        load_data_accordion.set_title(1, '0. Cargar Datos')
+        load_data_accordion.set_title(1, '2. Seleccionar Datos')
 
-        with open(profile_path,'r') as f:
-            profile_json = json.load(f)
+        if exists(profile_path):
+            with open(profile_path,'r') as f:
+                profile_json = json.load(f)
+        else:
+            help_html0.value = '<font color="red">No se encontró el archivo de perfil de usuario.</font>'
 
         if not 'token' in profile_json.keys():
             help_html0.value = "Parece que no cuentas con un token de autorización todavía. Por favor ingresa tus credenciales para generar uno."
-            login_widget.layout.display=None
+            download_help.value = 'Parece que no cuentas con un token de autorización todavía. Por favor ingresa tus credenciales en el paso 1 para generar uno.'
+            login_widget.layout.display = None
         else:
-            help_html0.value = "<font color='green'>Tus credenciales estan en orden. Todo listo para cargar datos! Si no puedes cargar datos es posible que tu token este desactualizado.</font>"
-            update_token_button.layout.display=None
+            help_html0.value = "<font color='green'>Tus credenciales están en orden. Todo listo para cargar datos! Si no puedes cargar datos es posible que tu token este desactualizado.</font>"
+            download_help.value = '<div style="margin-bottom:20pt"><font size=3>Selecciona los conjuntos de datos que serán actualizado y/o descargados. Mantén presionado CTRL para seleccionar múltiples conjuntos.</font></div>'
+            update_token_button.layout.display = None
+            download_data_widget.layout.display = None
+            download_button.disabled = False
+            load_data_accordion.selected_index = 1
+
+
         
-        super().__init__(children=[load_data_accordion], **kwargs)
+        super().__init__(children=[load_data_accordion,widgets.HBox([download_button,button_help,]),], **kwargs)
