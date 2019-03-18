@@ -837,7 +837,7 @@ class LoadDataWidget(widgets.VBox):
                     coop_writer.save()
                     muni_writer.save()
                     
-                    button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code>datos</code></a> y ahora los puedes usar en las otras aplicaciones!</font>'
+                    button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code><font color="#fcb070">datos</font></code></a> y ahora los puedes usar en las otras aplicaciones! Por ejemplo: <a href="http://localhost:8888/apps/Generar%20Reportes%20POA.ipynb?appmode_scroll=0" target=_><font color="#fcb070">Generar Reportes POA</font></a></font>'
                 
         username_widget.observe(on_username_change, names='value')
         password_widget.observe(on_password_change, names='value')
