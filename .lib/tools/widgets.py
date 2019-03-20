@@ -8,6 +8,7 @@ import pandas as pd
 from pandas import ExcelWriter
 from datetime import datetime
 import docx
+import base64
 
 # Paths
 
@@ -24,9 +25,9 @@ muni_xl_path = join(data_path,'poas_muni.xlsx')
 coop_doc_path = join(models_path,'modelo_poa_coop.docx')
 muni_doc_path = join(models_path,'modelo_poa_muni.docx')
 
-server_base_url = 'http://localhost:8000'
+# server_base_url = 'http://localhost:8000'
 # server_base_url = 'http://200.87.123.68'
-# server_base_url = 'http://aaps-lab.ml'
+server_base_url = 'http://aaps-lab.ml'
 
 available_datasets = ['poas_muni.xlsx', 'poas_coop.xlsx']
 
@@ -68,6 +69,11 @@ class GenerateReportWidget(widgets.VBox):
             gastos_transferencias='TRANSFERENCIAS',
             gastos_impuesto='IMPUESTOS, REGALÍAS Y TASAS',
             gastos_otros='OTROS GASTOS',
+            costos_operacion='COSTOS DE OPERACIÓN',
+            costos_mantenimiento='COSTOS DE MANTENIMIENTO',
+            gastos_administrativos='GASTOS ADMINISTRATIVOS',
+            gastos_comerciales='GASTOS COMERCIALES',
+            gastos_financieros='GASTOS FINANCIEROS',
             inv_infraestructura_ap='CONSTRUCCIÓN DE INFRAESTRUCTURA SISTEMA AGUA POTABLE',
             inv_infraestructura_alc='CONSTRUCCIÓN DE INFRAESTRUCTURA SISTEMA DE ALCANTARILLADO',
             inv_equipo='ADQUISICIÓN DE MAQUINARIA Y EQUIPO',
@@ -162,35 +168,39 @@ class GenerateReportWidget(widgets.VBox):
             value=None,
             description='Ingresos Operativos (Bs.):',
             disabled=True,
-            layout=widgets.Layout(display='none',width='400px'),
+            layout=widgets.Layout(width='400px'),
             style={'description_width': '185px'},
         )
         in_no_op_text = widgets.Text(
             value=None,
             description='Ingresos No Operativos (Bs.):',
             disabled=True,
-            layout=widgets.Layout(display='none',width='400px'),
+            layout=widgets.Layout(width='400px'),
             style={'description_width': '185px'},
         )
+        in_op_percentage = widgets.HTML()
+        in_no_op_percentage = widgets.HTML()
+        serv_pers_percentage = widgets.HTML()
+
         in_total_text = widgets.Text(
             value=None,
             description='Ingresos Totales (Bs.):',
             disabled=True,
-            layout=widgets.Layout(display='none',width='400px'),
+            layout=widgets.Layout(width='400px'),
             style={'description_width': '185px'},
         ) 
         serv_pers_text = widgets.Text(
             value=None,
             description='Servicios Personales (Bs.):',
             disabled=True,
-            layout=widgets.Layout(display='none',width='400px'),
+            layout=widgets.Layout(width='400px'),
             style={'description_width': '185px'},
         )
         total_gastos_text = widgets.Text(
             value=None,
             description='Gastos Totales (Bs.):',
             disabled=True,
-            layout=widgets.Layout(display='none',width='400px'),
+            layout=widgets.Layout(width='400px'),
             style={'description_width': '185px'},
         )
 
@@ -198,7 +208,7 @@ class GenerateReportWidget(widgets.VBox):
             value=None,
             description='Total Inversiones (Bs.):',
             disabled=True,
-            layout=widgets.Layout(display='none',width='400px'),
+            layout=widgets.Layout(width='400px'),
             style={'description_width': '165px'},
         ) 
 
@@ -206,6 +216,7 @@ class GenerateReportWidget(widgets.VBox):
         help_html = widgets.HTML()
 
         help_grid = qgrid.QGridWidget(df=pd.DataFrame())
+        active_tab = widgets.Text(value='general')
 
         def build_intro():
             num = report_number.value
@@ -222,6 +233,7 @@ class GenerateReportWidget(widgets.VBox):
 
         intro_html = widgets.HTML(value=build_intro())
         intro_help_html = widgets.HTML()
+        download_tag = widgets.HTML()
 
         def on_type_toggle_change(change):
             if change['new'] == 'Cooperativas':
@@ -270,12 +282,14 @@ class GenerateReportWidget(widgets.VBox):
             if change['new']:
                 epsa_dropdown.layout.display = None
                 df = help_grid.df
+                year_dropdown.options = []
                 year_dropdown.options = list(df[df.epsa==change['new']].year)
 
         def on_year_dropdown_change(change):
             if change['new']:
                 year_dropdown.layout.display = None
                 df = help_grid.df
+                order_dropdown.options = []
                 order_dropdown.options = list(df[(df.epsa==epsa_dropdown.value)&(df.year==change['new'])].order)
 
         def on_order_dropdown_change(change):
@@ -292,44 +306,51 @@ class GenerateReportWidget(widgets.VBox):
 
                 in_op_cols = ['in_op_ap','in_op_alc','in_op_alc_pozo','in_op_otros']
                 in_no_op_cols = ['in_financieros','in_no_op_otros']
-                serv_pers_cols = ['gastos_empleados_permanentes','gastos_empleados_no_permanentes','gastos_prevision_social',]
 
-                text_widgets = [in_op_text,in_no_op_text,in_total_text,serv_pers_text,total_gastos_text,total_inv_text]
-                values = [
-                    dfs[1][in_op_cols].iloc[0].sum(),
-                    dfs[1][in_no_op_cols].iloc[0].sum(),
-                    dfs[1].iloc[0].sum(),
-                    dfs[2][serv_pers_cols].iloc[0].sum(),
-                    dfs[2].iloc[0].sum(),
-                    dfs[3].iloc[0].sum(),
+                in_op_val = dfs[1][in_op_cols].iloc[0].sum()
+                in_no_op_val = dfs[1][in_no_op_cols].iloc[0].sum()
+                in_total_val = dfs[1].iloc[0].sum()
+                total_gastos_val = dfs[2].iloc[0].sum()
+                total_inv_val = dfs[3].iloc[0].sum()
+                
+                widget_vals = [
+                    (in_op_text,in_op_val,),
+                    (in_no_op_text,in_no_op_val,),
+                    (in_total_text,in_total_val,),
+                    (total_gastos_text,total_gastos_val,),
+                    (total_inv_text,total_inv_val,),
                 ]
-
-                for w,val in zip(text_widgets,values):
+                
+                in_op_percentage.value = '{:.2f}'.format(in_op_val / in_total_val * 100) + '% del total'
+                in_no_op_percentage.value = '{:.2f}'.format(in_no_op_val / in_total_val * 100) + '% del total'
+                
+                if type_toggle.value == 'Municipales':
+                    serv_pers_text.layout.display = None
+                    serv_pers_cols = ['gastos_empleados_permanentes','gastos_empleados_no_permanentes','gastos_prevision_social',]
+                    serv_pers_val = dfs[2][serv_pers_cols].iloc[0].sum()
+                    widget_vals.append((serv_pers_text,serv_pers_val,))
+                    serv_pers_percentage.value = '{:.2f}'.format(serv_pers_val/ total_gastos_val * 100) + '% del total'
+                if type_toggle.value == 'Cooperativas':
+                    serv_pers_text.layout.display = 'none'
+                    
+                for w,val in widget_vals:
                     w.value = float_to_text(val)
-                    w.layout.display = None
 
                 for df in dfs:
                     df.columns = [column_name_to_verbose.get(cn,cn) for cn in list(df)]
 
+                columns = ['Descripción','Valor (Bs.)']
                 dfs = [df.transpose() for df in dfs]
+                
                 for df in dfs:
-                    df.columns = ['Valor (Bs.)']
-                for df in dfs[1:]:
-                    df['Valor (Bs.)']= df['Valor (Bs.)'].apply(lambda x:"{:,.2f}".format(x))
+                    df.reset_index(level=0, inplace=True)
+                    df.columns = columns
+                for df,total in zip(dfs[1:],[in_total_val,total_gastos_val,total_inv_val]):
+                    df['%'] = df['Valor (Bs.)'].apply(lambda x: '{:.2f}'.format(x / total * 100))
+                    df['Valor (Bs.)']= df['Valor (Bs.)'].apply(float_to_text)
 
                 for grid,df in zip(grids,dfs):
                     grid.df = df
-
-        def on_report_number_change(change):
-            intro_html.value = build_intro()
-        def on_qualification_type_change(change):
-            intro_html.value = build_intro()
-        def on_name_text_change(change):
-            intro_html.value = build_intro()
-        def on_specialty_text_change(change):
-            intro_html.value = build_intro()
-        def on_date_picker_change(change):
-            intro_html.value = build_intro()
 
         def on_save_profile_button_click(b):
             if profile_json:
@@ -417,12 +438,15 @@ class GenerateReportWidget(widgets.VBox):
 
             doc.save(join(out_path,f'reporte_poa.docx'))
 
-            help_html.value = '''
-            Informe generado y guardado en la carpeta <a href="http://localhost:8888/tree/datos/reportes" target="_blank"><code>datos/reportes</code></a>!
-            Puedes descargar los reportes desde el navegador (<a href="http://localhost:8888/tree/datos/reportes" target="_blank"><font color="blue">LINK</font></a>)
-            o acceder a ellos directamente a la carpeta en tu ordenador.'
+            with open(join(out_path,'reporte_poa.docx'),'rb') as f:
+                b64 = base64.b64encode(f.read())
+            
+            help_html.value = f'''
+            Informe generado y guardado en la carpeta de <font color="#ff7823"><a href="http://localhost:8888/tree/datos/reportes" target="_blank"><code>datos/reportes</code></a></font>!
+            Puedes descargarlos desde ahí, acceder al archivo en tu ordenador o descargarlos haciendo click en el botón de arriba.
             '''
-
+            download_tag.value = f'<a class="jupyter-button mod-info" style="line-height: 50px; height:50px" download="reporte_poa.docx" href="data:text/csv;base64,{b64.decode()}" target="_blank"><i class="fa fa-download"></i>Descargar</a>'
+            
             if not random:
                 if profile_json:
                     profile_json['last_report_num'] = report_number.value
@@ -437,23 +461,26 @@ class GenerateReportWidget(widgets.VBox):
         '''
 
         def on_cell_edited(event,grid):
-            col,idx,old,new = [event[key] for key in ['column','index','old','new']] 
+            col,idx,old,new = [event[key] for key in ['column','index','old','new']]
+            
+            if not col == 'Valor (Bs.)' or active_tab.value == 'general':
+                return
             try:
-                new_val = float(new.replace(',',''))
+                text_to_float(new)
                 help_html.value = ''
             except ValueError:
                 changed_df = grid.get_changed_df()
-                changed_df[event['column']][event['index']] = event['old']
+                changed_df[col][idx] = old
                 grid.df = changed_df
                 help_html.value = format_help
                 return
-
+            
             in_op_idxs = [
                 'SERVICIOS DE AGUA POTABLE',
                 'SERVICIOS DE ALCANTARILLADO',
                 'SERVICIOS DE ALCANTARILLADO DE POZO',
                 'OTROS INGRESOS OPERATIVOS',
-            ]
+            ] 
             in_no_op_idxs = [
                 'INGRESOS FINANCIEROS',
                 'OTROS INGRESOS NO OPERATIVOS',
@@ -470,37 +497,55 @@ class GenerateReportWidget(widgets.VBox):
                 'DISEÑO Y ESTUDIOS DE PROYECTOS',
                 'OTROS',
             ]
-
+            
             df = grid.get_changed_df()
             df_total = float_to_text(df[col].apply(text_to_float).sum())
-
-            idxs_list = [in_op_idxs,in_no_op_idxs,serv_pers_idxs]
-            text_widgets = [in_op_text, in_no_op_text,serv_pers_text]
-
-            total_idxs_list = [in_op_idxs + in_no_op_idxs,serv_pers_idxs,inv_idxs]
+            df['%'][idx] = float_to_text(text_to_float(df['Valor (Bs.)'][idx])/text_to_float(df_total)*100)
+            
+            idx_text_percentages = [
+                (in_op_idxs,in_op_text,in_op_percentage),
+                (in_no_op_idxs,in_no_op_text,in_no_op_percentage),
+            ]
+            
+            if type_toggle.value == 'Municipales':
+                idx_text_percentages.append((serv_pers_idxs,serv_pers_text,serv_pers_percentage,))
+            
+            for idxs,text_widget,percentage_widget in idx_text_percentages:
+                if df['Descripción'][idx] in idxs:
+                    new_val = df[df['Descripción'].isin(idxs)]['Valor (Bs.)'].apply(text_to_float).sum()
+                    text_widget.value = float_to_text(new_val)
+                    percentage_widget.value = '{:.2f}'.format(new_val / text_to_float(df_total) * 100) + '% del total'
+            
+            tab_names = ['ingresos','gastos','inversiones']
             total_widgets = [in_total_text,total_gastos_text,total_inv_text]
-
-            for idxs, text_widget in zip(idxs_list,text_widgets):
-                if idx in idxs:
-                    text_widget.value = float_to_text(df[col][idxs].apply(text_to_float).sum())
-
-            for idxs, text_widget in zip(total_idxs_list,total_widgets):
-                if idx in idxs:
-                    text_widget.value = df_total
+            
+            for tab_name,total_widget in zip(tab_names, total_widgets):
+                if active_tab.value == tab_name:
+                    total_widget.value = df_total
+            
+            grid.df = df
 
         def on_generate_random_button_click(b):
             on_generate_button_click(b,random=True)
+
+        def set_active_tab(val):
+            active_tab.value = val
+
+        def update_active_tab(val):
+            return lambda event,grid: set_active_tab(val)
             
+        def update_intro(change):
+            intro_html.value = build_intro()
 
         type_toggle.observe(on_type_toggle_change, names='value')
         epsa_dropdown.observe(on_epsa_dropdown_change, names='value')
         year_dropdown.observe(on_year_dropdown_change, names='value')
         order_dropdown.observe(on_order_dropdown_change, names='value')
-        report_number.observe(on_report_number_change, names='value')
-        qualification_type.observe(on_qualification_type_change,names='value')
-        name_text.observe(on_name_text_change,names='value')
-        specialty_text.observe(on_specialty_text_change,names='value')
-        date_picker.observe(on_date_picker_change,names='value')
+        report_number.observe(update_intro, names='value')
+        qualification_type.observe(update_intro,names='value')
+        name_text.observe(update_intro,names='value')
+        specialty_text.observe(update_intro,names='value')
+        date_picker.observe(update_intro,names='value')
         save_profile_button.on_click(on_save_profile_button_click)
         generate_button.on_click(on_generate_button_click)
         generate_random_button.on_click(on_generate_random_button_click)
@@ -510,12 +555,24 @@ class GenerateReportWidget(widgets.VBox):
         tab_names = [sn.title() for sn in sheet_names]
         grids = []
         for i in range(len(tab_names)):
-            grids.append(qgrid.QGridWidget(df=pd.DataFrame()))
+            grids.append(qgrid.QGridWidget(df=pd.DataFrame(),show_toolbar=True,))
+            
+            
+        for i,val in zip(range(4),['general','ingresos','gastos','inversiones']):
+            grids[i].on('selection_changed',update_active_tab(val))
 
         tab = widgets.Tab([
             grids[0],
-            widgets.VBox([grids[1],in_op_text,in_no_op_text,in_total_text]),
-            widgets.VBox([grids[2],serv_pers_text,total_gastos_text]),
+            widgets.VBox([
+                grids[1],
+                widgets.HBox([in_op_text,in_op_percentage,]),
+                widgets.HBox([in_no_op_text,in_no_op_percentage,]),
+                in_total_text,
+            ]),
+            widgets.VBox([
+                grids[2],
+                widgets.HBox([serv_pers_text,serv_pers_percentage,]),
+                total_gastos_text]),
             widgets.VBox([grids[3],total_inv_text]),
         ])
 
@@ -537,7 +594,7 @@ class GenerateReportWidget(widgets.VBox):
         accordion.set_title(2, '3. Vista Previa / Editar Datos')
         accordion.selected_index = None
 
-        super().__init__(children=[accordion,tab,widgets.HBox([generate_button,generate_random_button]),help_html,], **kwargs)
+        super().__init__(children=[accordion,tab,widgets.HBox([generate_button,generate_random_button,download_tag]),help_html,], **kwargs)
         
 class LoadDataWidget(widgets.VBox):   
     def __init__(self, **kwargs):
@@ -666,13 +723,13 @@ class LoadDataWidget(widgets.VBox):
         def build_overview():
             lds = local_datasets_select.value
             eds = external_datasets_select.value
-            
+
             lds_enum =  '<ol>' + ''.join([f'<li>{x}</li>' for x in lds]) + '</ol>'
             eds_enum =  '<ol>' + ''.join([f'<li>{x}</li>' for x in eds]) + '</ol>'
-            
+
             update_txt = '' if lds == () else 'Estos conjuntos de datos serán actualizados:</br>'
             download_txt = '' if eds == () else 'Estos conjuntos de datos nuevos serán descargados:</br>'
-            
+
             overview_html.value=f'''<div style="background-color: #ddffff;border-left: 6px solid #2196F3; padding: 0.01em 16px">
             {update_txt}
             {lds_enum}
@@ -751,7 +808,7 @@ class LoadDataWidget(widgets.VBox):
                 download_data_widget.layout.display = None
                 load_data_accordion.selected_index = 1
                 download_button.disabled = False
-                    
+
             else:
                 help_html.value = "<font color='red'>Las credenciales proporcionadas no son válidas.</font> Verifica tus credenciales. Si el problema persiste, trata de ingresar a través de la <a href='https://aaps-data.appspot.com/admin/'>aplicación administrativa</a>. Si no puedes ingresar a través de esa página tampoco, contacta al administrador/administradora."
 
@@ -788,7 +845,7 @@ class LoadDataWidget(widgets.VBox):
         def on_download_button_click(b):
             with open(profile_path,'r') as f:
                 token = json.load(f)['token']
-            
+
             headers = dict(Authorization=f'Token {token}')
             selected_datasets = local_datasets_select.value + external_datasets_select.value
 
@@ -802,7 +859,7 @@ class LoadDataWidget(widgets.VBox):
                 else:
                     coop_writer = ExcelWriter(coop_xl_path)
                     muni_writer = ExcelWriter(muni_xl_path)
-                    
+
                     poas_jsons = dict(coop=[],muni=[])
                     for poa in response_json:
                         coop_dict = poa['coop_expense']
@@ -830,15 +887,15 @@ class LoadDataWidget(widgets.VBox):
                             coop_df[cols_list].to_excel(coop_writer,sn,index=False)
                             muni_df[cols_list].to_excel(muni_writer,sn,index=False)
 
-                    
+
                     if not exists(data_path):
                         os.makedirs(data_path)
 
                     coop_writer.save()
                     muni_writer.save()
-                    
+
                     button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code><font color="#fcb070">datos</font></code></a> y ahora los puedes usar en las otras aplicaciones! Por ejemplo: <a href="http://localhost:8888/apps/Generar%20Reportes%20POA.ipynb?appmode_scroll=0" target=_><font color="#fcb070">Generar Reportes POA</font></a></font>'
-                
+
         username_widget.observe(on_username_change, names='value')
         password_widget.observe(on_password_change, names='value')
         show_password_button.observe(on_show_pass_change, names='value')
@@ -873,7 +930,5 @@ class LoadDataWidget(widgets.VBox):
             download_data_widget.layout.display = None
             download_button.disabled = False
             load_data_accordion.selected_index = 1
-
-
         
         super().__init__(children=[load_data_accordion,widgets.HBox([download_button,button_help,]),], **kwargs)
