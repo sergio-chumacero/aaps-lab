@@ -40,7 +40,7 @@ msgstr "Guardar"
 
 #: notebook/templates/edit.html:52 notebook/templates/tree.html:36
 msgid "Rename"
-msgstr "Remover"
+msgstr "Renombrar"
 
 #: notebook/templates/edit.html:53 notebook/templates/tree.html:38
 msgid "Download"
