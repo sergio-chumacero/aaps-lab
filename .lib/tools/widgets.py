@@ -14,7 +14,8 @@ from docxtpl import DocxTemplate
 
 home_dir = join(os.environ['USERPROFILE'],'aapslab')
 data_path = join(home_dir,'datos')
-models_path = join(home_dir,'.lib','models')
+
+tpl_path = join(home_dir,'.lib','templates')
 out_path = join(data_path,'reportes')
 
 profile_path = join(home_dir,'.profile','profile.json')
@@ -23,8 +24,8 @@ coop_xl_path = join(data_path,'poas_coop.xlsx')
 muni_xl_path = join(data_path,'poas_muni.xlsx')
 epsas_xl_path = join(data_path,'epsas.xlsx')
 
-coop_tpl_path = join(models_path,'coop_poa_tpl.docx')
-muni_tpl_path = join(models_path,'muni_poa_tpl.docx')
+coop_tpl_path = join(tpl_path,'coop_poa_tpl.docx')
+muni_tpl_path = join(tpl_path,'muni_poa_tpl.docx')
 
 server_base_url = 'http://aaps-lab.ml'
 available_datasets = ['EPSAS','POAS']
@@ -77,6 +78,15 @@ class GenerateReportWidget(widgets.VBox):
             inv_diseno_estudio='DISEÑO Y ESTUDIOS DE PROYECTOS',
             inv_otros='OTROS',
         )
+
+        ant_par_2_epsas = [
+            'EPSAS','SAGUAPAC','COSMOL','ELAPAS','SEMAPA',
+            'SELA','COATRI','CAPAG','AAPOS','COSAALT',
+            'EMAPYC','COSPHUL','COSCHAL','COOPAGUAS','COSPAIL',
+            'COOPLAN','EMAAB','LA GUARDIA','COOPAPPI','COSMIN',
+            'EMSABAV','COSPAS','SEAPAS','COSAP','COOPLIM',
+            'MANCHACO','COSEPW',
+        ]
 
         report_number = widgets.BoundedIntText(
             value= profile_json.get('last_report_num',0) + 1,
@@ -163,17 +173,17 @@ class GenerateReportWidget(widgets.VBox):
 
         in_op_text = widgets.Text(
             value=None,
-            description='Ingresos Operativos (Bs.):',
+            description='Operativos (Bs.):',
             disabled=True,
-            layout=widgets.Layout(width='400px'),
-            style={'description_width': '185px'},
+            layout=widgets.Layout(width='300px'),
+            style={'description_width': '115px'},
         )
         in_no_op_text = widgets.Text(
             value=None,
-            description='Ingresos No Operativos (Bs.):',
+            description='No Operativos (Bs.):',
             disabled=True,
-            layout=widgets.Layout(width='400px'),
-            style={'description_width': '185px'},
+            layout=widgets.Layout(width='300px'),
+            style={'description_width': '115px'},
         )
         in_op_percentage = widgets.HTML()
         in_no_op_percentage = widgets.HTML()
@@ -181,32 +191,32 @@ class GenerateReportWidget(widgets.VBox):
 
         in_total_text = widgets.Text(
             value=None,
-            description='Ingresos Totales (Bs.):',
+            description='Totales (Bs.):',
             disabled=True,
-            layout=widgets.Layout(width='400px'),
-            style={'description_width': '185px'},
+            layout=widgets.Layout(width='300px'),
+            style={'description_width': '115px'},
         ) 
         serv_pers_text = widgets.Text(
             value=None,
             description='Servicios Personales (Bs.):',
             disabled=True,
-            layout=widgets.Layout(width='400px'),
-            style={'description_width': '185px'},
+            layout=widgets.Layout(width='300px'),
+            style={'description_width': '155px'},
         )
         total_gastos_text = widgets.Text(
             value=None,
             description='Gastos Totales (Bs.):',
             disabled=True,
-            layout=widgets.Layout(width='400px'),
-            style={'description_width': '185px'},
+            layout=widgets.Layout(width='300px'),
+            style={'description_width': '155px'},
         )
 
         total_inv_text = widgets.Text(
             value=None,
-            description='Total Inversiones (Bs.):',
+            description='Total (Bs.):',
             disabled=True,
-            layout=widgets.Layout(width='400px'),
-            style={'description_width': '165px'},
+            layout=widgets.Layout(width='300px'),
+            style={'description_width': '100px'},
         )
 
         city_dropdown = widgets.Dropdown(
@@ -227,12 +237,42 @@ class GenerateReportWidget(widgets.VBox):
         table_help = widgets.HTML(
             layout=widgets.Layout(width='95%')
         )
-
-
         help_html = widgets.HTML()
 
         help_grid = qgrid.QGridWidget(df=pd.DataFrame())
         active_tab = widgets.Text(value='general')
+
+        out_name_text = widgets.Text(
+            value=f'reporte_poa',
+            description='Nombre del reporte:',
+            disabled=False,
+            tooltip='Nombre del archivo que será generado. Por ejemplo: reporte_poa.docx',
+            layout=widgets.Layout(width='400px'),
+            style={'description_width': '165px'},
+        )
+        out_name_help = widgets.HTML(value=f'{out_path}\\<b>{out_name_text.value}</b>.docx')
+
+        ingresos_text_box = widgets.Textarea(
+            value='',
+            placeholder='Análisis de Igresos. Será incluido en el reporte generado bajo la tabla de ingresos. Puedes dejarlo vacío y llenarlo directamente en el documento generado.',
+            description='Análisis:',
+            disabled=False,
+            layout=widgets.Layout(display='none',width='100%'),
+        )
+        gastos_text_box = widgets.Textarea(
+            value='',
+            placeholder='Análisis de Gastos. Será incluido en el reporte generado bajo la tabla de gastos. Puedes dejarlo vacío y llenarlo directamente en el documento generado.',
+            description='Análisis:',
+            disabled=False,
+            layout=widgets.Layout(display='none',width='100%'),
+        )
+        inversiones_text_box = widgets.Textarea(
+            value='',
+            placeholder='Análisis de Inversiones. Será incluido en el reporte generado bajo la tabla de inversiones. Puedes dejarlo vacío y llenarlo directamente en el documento generado.',
+            description='Análisis:',
+            disabled=False,
+            layout=widgets.Layout(display='none',width='100%'),
+        )
 
         def build_intro():
             num = report_number.value
@@ -272,7 +312,7 @@ class GenerateReportWidget(widgets.VBox):
                         grid.df = pd.DataFrame()
                     generate_button.disabled = True
                     generate_random_button.layout.display = None
-                    help_html.value = "<font color='red'>Parece que no tienes datos de Cooperativas. Trata de descargar estos datos desde la aplicación 'Descargar Datos'. También puedes generar un reporte con datos aleatorios.</font>"
+                    help_html.value = "Parece que no tienes datos de Cooperativas. Trata de descargar estos datos desde la aplicación <a href='http://localhost:8888/apps/Actualizar%20o%20Descargar%20Datos.ipynb?appmode_scroll=0' target='_blank'>Actualizar o Descargar Datos</a>. También puedes generar un reporte con datos aleatorios."    
 
             if change['new'] == 'Municipales':
                 if exists(muni_xl_path):
@@ -299,6 +339,7 @@ class GenerateReportWidget(widgets.VBox):
             if change['new']:
                 epsa_dropdown.layout.display = None
                 df = help_grid.df
+        #         out_name_text.value = f'reporte_poa_{change["new"]}.docx'
                 year_dropdown.options = []
                 year_dropdown.options = list(df[df.epsa==change['new']].year)
 
@@ -306,6 +347,7 @@ class GenerateReportWidget(widgets.VBox):
             if change['new']:
                 year_dropdown.layout.display = None
                 df = help_grid.df
+                out_name_text.value = f'reporte_poa_{epsa_dropdown.value}_{change["new"]}'
                 order_dropdown.options = []
                 order_dropdown.options = list(df[(df.epsa==epsa_dropdown.value)&(df.year==change['new'])].order)
 
@@ -338,17 +380,18 @@ class GenerateReportWidget(widgets.VBox):
                     (total_inv_text,total_inv_val,),
                 ]
 
-                in_op_percentage.value = '{:.2f}'.format(in_op_val / in_total_val * 100) + '% del total'
-                in_no_op_percentage.value = '{:.2f}'.format(in_no_op_val / in_total_val * 100) + '% del total'
+                in_op_percentage.value = '{:.2f}'.format(in_op_val / in_total_val * 100) + '%'
+                in_no_op_percentage.value = '{:.2f}'.format(in_no_op_val / in_total_val * 100) + '%'
 
                 if type_toggle.value == 'Municipales':
                     serv_pers_text.layout.display = None
                     serv_pers_cols = ['gastos_empleados_permanentes','gastos_empleados_no_permanentes','gastos_prevision_social',]
                     serv_pers_val = dfs[2][serv_pers_cols].iloc[0].sum()
                     widget_vals.append((serv_pers_text,serv_pers_val,))
-                    serv_pers_percentage.value = '{:.2f}'.format(serv_pers_val/ total_gastos_val * 100) + '% del total'
+                    serv_pers_percentage.value = '{:.2f}'.format(serv_pers_val/ total_gastos_val * 100) + '%'
                 if type_toggle.value == 'Cooperativas':
                     serv_pers_text.layout.display = 'none'
+                    serv_pers_percentage.value = ''
 
                 for w,val in widget_vals:
                     w.value = float_to_text(val)
@@ -368,6 +411,11 @@ class GenerateReportWidget(widgets.VBox):
 
                 for grid,df in zip(grids,dfs):
                     grid.df = df
+                    
+                
+                for box in [ingresos_text_box, gastos_text_box, inversiones_text_box]:
+                    box.value = ''
+                    box.layout.display = None
 
         def on_save_profile_button_click(b):
             if profile_json:
@@ -402,9 +450,10 @@ class GenerateReportWidget(widgets.VBox):
                 is_coop, is_muni = False, True
 
             doc = DocxTemplate(tpl_path)
-            
+
             if not random:
-                income_data, expenses_data, investments_data = [list(grids[i+1].get_changed_df()['Valor (Bs.)'].apply(text_to_float)) for i in range(3)]
+                income_data, expenses_data, investments_data = [grids[i+1].get_changed_df()['Valor (Bs.)'].apply(text_to_float) for i in range(3)]
+                income_p_data, expenses_p_data, investments_p_data = [grids[i+1].get_changed_df()['%'].apply(text_to_float) for i in range(3)]
 
             # Intro
             date = date_picker.value
@@ -412,6 +461,14 @@ class GenerateReportWidget(widgets.VBox):
             specialty = specialty_text.value.upper() if specialty_text.value else ''
             denom = prof_name_to_denom[prof] if prof else ''
             name = name_text.value.title() if name_text.value else ''
+
+            
+            epsa =  epsa_dropdown.value
+            ant_2_par = ''
+            if epsa in ant_par_2_epsas:
+                ant_2_par = f'Manual de Seguimiento de cumplimiento de obligaciones compromisos y procedimientos a seguir de la EPSA {epsa}.'
+            else:
+                ant_2_par = 'Mediante la RAR SISAB Nº 124/2007 del 12 de junio del 2007 se aprueba la guía de solicitud de Licencias y Registros, Manual de Seguimiento de Licencias y Manual para la elaboración del Plan de Desarrollo Quinquenal para licencias.'
             
             context = dict(
                 prof=prof.upper(),
@@ -423,66 +480,77 @@ class GenerateReportWidget(widgets.VBox):
                 report_num=f'{report_number.value:03d}',
                 city=city_dropdown.value,
                 specialty=specialty,
-                antecedente2='Segundo párrafo de antecedentes.',
+                antecedente2=ant_2_par,
                 antecedente3='Tercer párrafo de antecedentes.',
                 antecedente4='Cuarto párrafo de antecedentes.',
                 cumplimiento_paragraphs= [
                     'Primer párrafo de cumplimiento.',
                     'Segundo párrafo de cumplimiento.',
                     'Tercer párrafo de cumplimiento.'
-                ]
+                ],
+                ingresos_paragraphs=ingresos_text_box.value.split('\n\n'),
+                gastos_paragraphs=gastos_text_box.value.split('\n\n'),
+                inversiones_paragraphs=inversiones_text_box.value.split('\n\n'),
             )
+            
+            for i,val,p_val in zip(range(6),income_data.apply(float_to_text),income_p_data.apply(float_to_text)):
+                context[f'in_{i+1}'] = val
+                context[f'in_{i+1}_p'] = p_val
+            
+            in_labels_indexes = [
+                ('in_op',[0,1,2,3,],),
+                ('in_op_serv',[0,1,],),
+                ('in_op_otros',[2,3,],),
+                ('in_no_op',[4,5,],),
+                ('in_total',[0,1,2,3,4,5,],),
+            ]
+            
+            for label,indexes in in_labels_indexes:
+                context[label] = float_to_text(income_data[indexes].sum())
+                context[f'{label}_p'] = float_to_text(income_p_data[indexes].sum())
+            
+            if is_coop:
+                num_rows = 5
+                out_labels_indexes = [
+                    ('out_total',[0,1,2,3,4],),
+                    ('costos',[0,1],),
+                    ('gastos',[2,3,4],),
+                ]
+            if is_muni:
+                num_rows = 10
+                out_labels_indexes = [
+                    ('gastos',[0,1,2,3,4,5,6,7,8,9,]),
+                    ('serv_pers',[0,1,2,]),
+                ]
 
-        #     if not random:
-        #         # Ingresos
-
-        #         for i,val in zip([3,4,6,7,9,10],income_data):
-        #             doc.tables[4].columns[1].cells[i].text = float_to_text(val)
-
-        #         doc.tables[4].columns[1].cells[2].text = float_to_text(income_data[0] + income_data[1])
-        #         doc.tables[4].columns[1].cells[5].text = float_to_text(income_data[2] + income_data[3])
-        #         doc.tables[4].columns[1].cells[8].text = float_to_text(income_data[4] + income_data[5])
-        #         doc.tables[4].columns[1].cells[1].text = float_to_text(sum([income_data[i] for i in range(4)]))
-        #         doc.tables[4].columns[1].cells[0].text = float_to_text(sum(income_data))
-
-        #         # Gastos
-        #         if is_coop:
-        #             for i,val in zip([2,3,5,6,7],expenses_data):
-        #                 doc.tables[5].columns[1].cells[i].text = float_to_text(val)
-
-        #             doc.tables[5].columns[1].cells[1].text = float_to_text(expenses_data[0] + expenses_data[1])
-        #             doc.tables[5].columns[1].cells[4].text = float_to_text(expenses_data[2] + expenses_data[3] + expenses_data[4])
-        #             doc.tables[5].columns[1].cells[0].text = float_to_text(sum(expenses_data))
-
-        #         if is_muni:
-        #             for i,val in zip([j+2 for j in range(10)],expenses_data):
-        #                 doc.tables[5].columns[1].cells[i].text = float_to_text(val) 
-
-        #             doc.tables[5].columns[1].cells[1].text = float_to_text(expenses_data[0] + expenses_data[1] + expenses_data[2])
-        #             doc.tables[5].columns[1].cells[0].text = float_to_text(sum(expenses_data))
-
-        #         # Inversiones
-
-        #         for i,val in zip([1,2,3,4,5],investments_data):
-        #             doc.tables[6].columns[1].cells[i].text = float_to_text(val)
-
-        #         doc.tables[6].columns[1].cells[0].text = float_to_text(sum(investments_data)) 
-
+            for i,val,p_val in zip(range(num_rows),expenses_data.apply(float_to_text),expenses_p_data.apply(float_to_text)):
+                context[f'out_{i+1}'] = val
+                context[f'out_{i+1}_p'] = p_val
+            for label,indexes in out_labels_indexes:
+                context[label] = float_to_text(expenses_data[indexes].sum())
+                context[f'{label}_p'] = float_to_text(expenses_p_data[indexes].sum())
+                
+            for i,val,p_val in zip(range(5),investments_data.apply(float_to_text),investments_p_data.apply(float_to_text)):
+                context[f'inv_{i+1}'] = val
+                context[f'inv_{i+1}_p'] = p_val
+            
+            context['inversiones'] = float_to_text(investments_data.sum())
+            
             # Finish
             if not exists(out_path):
                 os.makedirs(out_path)
 
             doc.render(context)
-            doc.save(join(out_path,"reporte_poa.docx"))
+            doc.save(join(out_path,f"{out_name_text.value}.docx"))
 
-            with open(join(out_path,'reporte_poa.docx'),'rb') as f:
+            with open(join(out_path,f'{out_name_text.value}.docx'),'rb') as f:
                 b64 = base64.b64encode(f.read())
 
             help_html.value = f'''
             Informe generado y guardado en la carpeta de <font color="#ff7823"><a href="http://localhost:8888/tree/datos/reportes" target="_blank"><code>datos/reportes</code></a></font>!
             Puedes descargarlos desde ahí, acceder al archivo en tu ordenador o descargarlos haciendo click en el botón de arriba.
             '''
-            download_tag.value = f'<a class="jupyter-button mod-info" style="line-height: 50px; height:50px" download="reporte_poa.docx" href="data:text/csv;base64,{b64.decode()}" target="_blank"><i class="fa fa-download"></i>Descargar</a>'
+            download_tag.value = f'<a class="jupyter-button mod-info" style="line-height: 50px; height:50px" download="{out_name_text.value}.docx" href="data:text/csv;base64,{b64.decode()}" target="_blank"><i class="fa fa-download"></i>Descargar</a>'
 
             if not random:
                 if exists(profile_path):
@@ -502,7 +570,12 @@ class GenerateReportWidget(widgets.VBox):
         def on_cell_edited(event,grid):
             col,idx,old,new = [event[key] for key in ['column','index','old','new']]
 
-            if not col == 'Valor (Bs.)' or active_tab.value == 'general':
+            if col in ['%','Descripción']:
+                changed_df = grid.get_changed_df()
+                changed_df[col][idx] = old
+                grid.df = changed_df
+                return
+            if active_tab.value == 'general':
                 return
             try:
                 text_to_float(new)
@@ -553,7 +626,7 @@ class GenerateReportWidget(widgets.VBox):
                 if df['Descripción'][idx] in idxs:
                     new_val = df[df['Descripción'].isin(idxs)]['Valor (Bs.)'].apply(text_to_float).sum()
                     text_widget.value = float_to_text(new_val)
-                    percentage_widget.value = '{:.2f}'.format(new_val / text_to_float(df_total) * 100) + '% del total'
+                    percentage_widget.value = '{:.2f}'.format(new_val / text_to_float(df_total) * 100) + '%'
 
             tab_names = ['ingresos','gastos','inversiones']
             total_widgets = [in_total_text,total_gastos_text,total_inv_text]
@@ -579,15 +652,17 @@ class GenerateReportWidget(widgets.VBox):
         def on_info_button_change(change):
             color = 'black' if change['new'] else '#fff'
             limit = -1 if change['new'] else 0
-            
+
             table_help.value = f'''<ul style="color:{color};">
             <li>En la siguiente tabla puedes ver los datos, a partir de los cuales se generará el POA.</li>
-            <li>Los valores de las celdas pueden ser modificados haciendo doble click sobre una celda.</li>
-            <li>Las columnas de descripción, porcentajes e índices se encuentran protegidas y no puedes ser modificadas, mientras que las columnas de valor pueden ser modificadas, pero el valor ingresado debe ser un número con un punto separando los decimales.</li>
-            <li>Las comas serán ignoradas para calcular los totales y serán utilizadas para visibilizar grandes valores numéricos de manera uniforme en los reportes generados, independientemente de como sean ingresadas en las tablas.</li>
-            <li>Todo cambio realizado se verá reflejado en el reporte generado.</li>
+            <li>Las columnas de valor pueden ser modificadas haciendo doble click sobre la celda</li> 
+            <li>El valor ingresado debe ser un número con un punto separando los decimales. Las comas son ignoradas.</li>
+            <li>Todo cambio realizado se verá reflejado actualizará los porcentajes y se verá en el reporte generado.</li>
             </ul> '''[:limit]
             
+        def on_out_name_text_change(change):
+            out_name_help.value = out_path + '\\' + f'<b>{change["new"]}</b>' + '.docx'
+
         type_toggle.observe(on_type_toggle_change, names='value')
         epsa_dropdown.observe(on_epsa_dropdown_change, names='value')
         year_dropdown.observe(on_year_dropdown_change, names='value')
@@ -596,6 +671,7 @@ class GenerateReportWidget(widgets.VBox):
         generate_button.on_click(on_generate_button_click)
         generate_random_button.on_click(on_generate_random_button_click)
         info_button.observe(on_info_button_change,names='value')
+        out_name_text.observe(on_out_name_text_change,names='value')
 
         for widg in [report_number,city_dropdown,qualification_type,name_text,specialty_text,date_picker]:
             widg.observe(update_intro,names='value')
@@ -605,12 +681,11 @@ class GenerateReportWidget(widgets.VBox):
         tab_names = [sn.title() for sn in sheet_names]
         grids = []
         for i in range(len(tab_names)):
-            grids.append(qgrid.QGridWidget(df=pd.DataFrame(),show_toolbar=True,))
-
+            grids.append(qgrid.QGridWidget(df=pd.DataFrame(),show_toolbar=False,))
 
         for i,val in zip(range(4),['general','ingresos','gastos','inversiones']):
             grids[i].on('selection_changed',update_active_tab(val))
-
+            
         tab = widgets.Tab([
             grids[0],
             widgets.VBox([
@@ -618,12 +693,19 @@ class GenerateReportWidget(widgets.VBox):
                 widgets.HBox([in_op_text,in_op_percentage,]),
                 widgets.HBox([in_no_op_text,in_no_op_percentage,]),
                 in_total_text,
+                ingresos_text_box,
             ]),
             widgets.VBox([
                 grids[2],
                 widgets.HBox([serv_pers_text,serv_pers_percentage,]),
-                total_gastos_text]),
-            widgets.VBox([grids[3],total_inv_text]),
+                total_gastos_text,
+                gastos_text_box,
+            ]),
+            widgets.VBox([
+                grids[3],
+                total_inv_text,
+                inversiones_text_box,
+            ]),
         ])
 
         for i,name in enumerate(tab_names):
@@ -641,15 +723,14 @@ class GenerateReportWidget(widgets.VBox):
             ]),intro_html]),
             widgets.VBox([type_toggle, epsa_dropdown, year_dropdown, order_dropdown,]),
             widgets.Button(),
-            widgets.Textarea(),
         ])
         accordion.set_title(0, '1. Datos Generales / Intro')
         accordion.set_title(1, '2. Cargar Datos POA')
         accordion.set_title(2, '3. Antecedentes')
-        accordion.set_title(3, '4. Cumplimiento')
         accordion.selected_index = None
 
-        super().__init__(children=[accordion,widgets.HBox([table_help,info_button]),tab,widgets.HBox([generate_button,generate_random_button,download_tag]),help_html,], **kwargs)
+
+        super().__init__(children=[accordion,widgets.HBox([table_help,info_button]),tab,widgets.HBox([out_name_text,out_name_help]),widgets.HBox([generate_button,generate_random_button,download_tag]),help_html,], **kwargs)
         
 class LoadDataWidget(widgets.VBox):   
     def __init__(self, **kwargs):
