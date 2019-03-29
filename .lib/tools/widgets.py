@@ -7,6 +7,15 @@ from requests.exceptions import ConnectionError
 import qgrid
 import pandas as pd
 from pandas import ExcelWriter
+import ipywidgets as widgets
+import os
+from os.path import join, exists, dirname
+import json
+import requests
+from requests.exceptions import ConnectionError
+import qgrid
+import pandas as pd
+from pandas import ExcelWriter
 from datetime import datetime
 import docx
 import base64
@@ -17,6 +26,7 @@ data_path = join(home_dir,'datos')
 
 tpl_path = join(home_dir,'.lib','templates')
 out_path = join(data_path,'reportes')
+mappings_path = join(home_dir,'.lib','mappings')
 
 profile_path = join(home_dir,'.profile','profile.json')
 
@@ -43,7 +53,7 @@ class GenerateReportWidget(widgets.VBox):
         else:
             profile_json = {}
 
-        sheet_names = ['general','ingresos','gastos','inversiones']
+        sheet_names = ['general','ingresos','gastos','inversiones','metas expansión']
         month_names = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
         month_num_to_name = {k+1:v for k,v in zip(range(12), month_names)}
         prof_name_to_denom = {'Ingeniero':'Ing.', 'Económico':'Lic.',}
@@ -77,6 +87,17 @@ class GenerateReportWidget(widgets.VBox):
             inv_equipo='ADQUISICIÓN DE MAQUINARIA Y EQUIPO',
             inv_diseno_estudio='DISEÑO Y ESTUDIOS DE PROYECTOS',
             inv_otros='OTROS',
+            anc='AGUA NO CONTABILIZADA',
+            cob_alc='COBERTURA DE ALCANTARILLADO',
+            cob_ap='COBERTURA DE AGUA POTABLE',
+            cob_micro='COBERTURA DE MICROMEDICIÓN',
+            con_alc='CONEXIONES NUEVAS ALCATARILLADO',
+            con_alc_total='TOTAL CONEXIONES ALCANTARILLADO',
+            con_ap='CONEXIONES NUEVAS DE AGUA POTABLE',
+            con_ap_total='TOTAL CONEXIONES DE AGUA POTABLE',
+            pob_alc='POBLACIÓN CON ALCANTARILLADO',
+            pob_ap='POBLACIÓN CON AGUA POTABLE',
+            pob_total='POBLACIÓN TOTAL',
         )
 
         ant_par_2_epsas = [
@@ -274,6 +295,14 @@ class GenerateReportWidget(widgets.VBox):
             layout=widgets.Layout(display='none',width='100%'),
         )
 
+        expansion_text_box = widgets.Textarea(
+            value='',
+            placeholder='Análisis de Metas de Expansión. Será incluido en el reporte generado bajo la tabla de metas de expansión. Puedes dejarlo vacío y llenarlo directamente en el documento generado.',
+            description='Análisis:',
+            disabled=False,
+            layout=widgets.Layout(display='none',width='100%'),
+        )
+
         def build_intro():
             num = report_number.value
             prof = prof_name_to_denom[qualification_type.value] if qualification_type.value else ''
@@ -288,9 +317,50 @@ class GenerateReportWidget(widgets.VBox):
             {city}, {date.day} de {month_num_to_name[date.month]} de {date.year}
             </div>'''
 
+        def build_ant():
+            ant_pars = ['El Decreto Supremo 071/2009 del 9 de Abril del 2009, Artículo 24, Inciso g), establece como competencia de la AAPS, regular y fiscalizar a los prestadores de servicio en lo referente a planes de operación, mantenimiento, expansión, fortalecimiento del servicio, precio, tarifas y otros.']
+            if epsa_dropdown.value:
+                epsa = epsa_dropdown.value
+                
+            if epsa in ant_par_2_epsas:
+                ant_2_par = f'Manual de Seguimiento de cumplimiento de obligaciones compromisos y procedimientos a seguir de la EPSA {epsa}.'
+            else:
+                ant_2_par = 'Mediante la RAR SISAB Nº 124/2007 del 12 de junio del 2007 se aprueba la guía de solicitud de Licencias y Registros, Manual de Seguimiento de Licencias y Manual para la elaboración del Plan de Desarrollo Quinquenal para licencias.'
+            ant_pars.append(ant_2_par)
+            
+            ant_3_par = ''
+            ant_3_df = None
+            if exists(join(mappings_path,'anexo_3.csv')):
+                ant_3_df = pd.read_csv(join(mappings_path,'anexo_3.csv'))
+            if ant_3_df is not None:
+                if epsa in list(ant_3_df.code):
+                    row = ant_3_df[ant_3_df.code == epsa]
+                    ant_3_par = f'Mediante RAR AAPS Nº {row.number.iloc[0]}, de fecha XXXX, se otorga la Licencia a "{row.name.iloc[0]}".'
+            if ant_3_par:
+                ant_pars.append(ant_3_par)
+
+            ant_4_par = ''
+            ant_4_df = None
+            if exists(join(mappings_path,'anexo_4.csv')):
+                ant_4_df = pd.read_csv(join(mappings_path,'anexo_4.csv'))
+            if ant_4_df is not None:
+                if epsa in list(ant_4_df.code):
+                    row = ant_4_df[ant_4_df.code == epsa]
+                    instructivo_circular = 'del Instructivo' if row.type.iloc[0] == 'instructivo' else 'de la Circular'
+                    ant_4_par = f'A través {instuctivo_circular} AAPS/DER/INS/Nº{row.number.iloc[0]}, de fecha {row.date.iloc[0]}, se comunica a la EPSA el Cronograma de Reporte de Información y Obligaciones de Titulares de Licencia.'
+            if ant_4_par:
+                ant_pars.append(ant_4_par)
+            
+            nl = '\n'
+            par_list = f'<ul>{nl}{nl.join([f"<li>{par}</li>" for par in ant_pars])}{nl}</ul>'
+            return f'Estos son los antecedentes que pudieron ser generados para la EPSA.{nl}<div style="background-color: #ddffff;border-left: 6px solid #2196F3; padding: 0.01em 16px">{nl}{par_list}{nl}</div>'
+            
+
         intro_html = widgets.HTML(value=build_intro())
         intro_help_html = widgets.HTML()
         download_tag = widgets.HTML()
+
+        ant_html = widgets.HTML(value='Selecciona una EPSA para generar los antecedentes.')
 
         def on_type_toggle_change(change):
             if change['new'] == 'Cooperativas':
@@ -342,6 +412,8 @@ class GenerateReportWidget(widgets.VBox):
         #         out_name_text.value = f'reporte_poa_{change["new"]}.docx'
                 year_dropdown.options = []
                 year_dropdown.options = list(df[df.epsa==change['new']].year)
+                
+            ant_html.value = build_ant()
 
         def on_year_dropdown_change(change):
             if change['new']:
@@ -402,18 +474,25 @@ class GenerateReportWidget(widgets.VBox):
                 columns = ['Descripción','Valor (Bs.)']
                 dfs = [df.transpose() for df in dfs]
 
-                for df in dfs:
-                    df.reset_index(level=0, inplace=True)
+                for df in dfs[:-1]:
+                    df.reset_index(level=0,inplace=True)
                     df.columns = columns
-                for df,total in zip(dfs[1:],[in_total_val,total_gastos_val,total_inv_val]):
+                
+                dfs[4].reset_index(level=0,inplace=True)
+                dfs[4].columns = ['Descripción','Valor']
+                
+                for df,total in zip(dfs[1:4],[in_total_val,total_gastos_val,total_inv_val]):
                     df['%'] = df['Valor (Bs.)'].apply(lambda x: '{:.2f}'.format(x / total * 100))
                     df['Valor (Bs.)']= df['Valor (Bs.)'].apply(float_to_text)
 
+                dfs[4]['Unidad'] = ['Hab.']*3 + ['N°']*2 + ['%'] + ['N°']*2 + ['%']*3
+                dfs[4]['Valor'] = dfs[4]['Valor'].apply(float_to_text)
+
                 for grid,df in zip(grids,dfs):
                     grid.df = df
-                    
-                
-                for box in [ingresos_text_box, gastos_text_box, inversiones_text_box]:
+
+
+                for box in [ingresos_text_box, gastos_text_box,inversiones_text_box,expansion_text_box]:
                     box.value = ''
                     box.layout.display = None
 
@@ -453,6 +532,7 @@ class GenerateReportWidget(widgets.VBox):
 
             if not random:
                 income_data, expenses_data, investments_data = [grids[i+1].get_changed_df()['Valor (Bs.)'].apply(text_to_float) for i in range(3)]
+                expansion_data = grids[4].get_changed_df()['Valor'].apply(text_to_float)
                 income_p_data, expenses_p_data, investments_p_data = [grids[i+1].get_changed_df()['%'].apply(text_to_float) for i in range(3)]
 
             # Intro
@@ -462,13 +542,37 @@ class GenerateReportWidget(widgets.VBox):
             denom = prof_name_to_denom[prof] if prof else ''
             name = name_text.value.title() if name_text.value else ''
 
-            
+
+            ant_pars = []
             epsa =  epsa_dropdown.value
-            ant_2_par = ''
             if epsa in ant_par_2_epsas:
                 ant_2_par = f'Manual de Seguimiento de cumplimiento de obligaciones compromisos y procedimientos a seguir de la EPSA {epsa}.'
             else:
                 ant_2_par = 'Mediante la RAR SISAB Nº 124/2007 del 12 de junio del 2007 se aprueba la guía de solicitud de Licencias y Registros, Manual de Seguimiento de Licencias y Manual para la elaboración del Plan de Desarrollo Quinquenal para licencias.'
+            ant_pars.append(ant_2_par)
+            
+            ant_3_par = ''
+            ant_3_df = None
+            if exists(join(mappings_path,'anexo_3.csv')):
+                ant_3_df = pd.read_csv(join(mappings_path,'anexo_3.csv'))
+            if ant_3_df is not None:
+                if epsa in list(ant_3_df.code):
+                    row = ant_3_df[ant_3_df.code == epsa]
+                    ant_3_par = f'Mediante RAR AAPS Nº {row.number.iloc[0]}, de fecha XXXX, se otorga la Licencia a "{row.name.iloc[0]}".'
+            if ant_3_par:
+                ant_pars.append(ant_3_par)
+
+            ant_4_par = ''
+            ant_4_df = None
+            if exists(join(mappings_path,'anexo_4.csv')):
+                ant_4_df = pd.read_csv(join(mappings_path,'anexo_4.csv'))
+            if ant_4_df is not None:
+                if epsa in list(ant_4_df.code):
+                    row = ant_4_df[ant_4_df.code == epsa]
+                    instructivo_circular = 'del Instructivo' if row.type.iloc[0] == 'instructivo' else 'de la Circular'
+                    ant_4_par = f'A través {instuctivo_circular} AAPS/DER/INS/Nº{row.number.iloc[0]}, de fecha {row.date.iloc[0]}, se comunica a la EPSA el Cronograma de Reporte de Información y Obligaciones de Titulares de Licencia.'
+            if ant_4_par:
+                ant_pars.append(ant_4_par)
             
             context = dict(
                 prof=prof.upper(),
@@ -480,9 +584,7 @@ class GenerateReportWidget(widgets.VBox):
                 report_num=f'{report_number.value:03d}',
                 city=city_dropdown.value,
                 specialty=specialty,
-                antecedente2=ant_2_par,
-                antecedente3='Tercer párrafo de antecedentes.',
-                antecedente4='Cuarto párrafo de antecedentes.',
+                antecedentes_paragraphs = ant_pars,
                 cumplimiento_paragraphs= [
                     'Primer párrafo de cumplimiento.',
                     'Segundo párrafo de cumplimiento.',
@@ -491,12 +593,13 @@ class GenerateReportWidget(widgets.VBox):
                 ingresos_paragraphs=ingresos_text_box.value.split('\n\n'),
                 gastos_paragraphs=gastos_text_box.value.split('\n\n'),
                 inversiones_paragraphs=inversiones_text_box.value.split('\n\n'),
+                expansion_paragraphs=expansion_text_box.value.split('\n\n'),
             )
-            
+
             for i,val,p_val in zip(range(6),income_data.apply(float_to_text),income_p_data.apply(float_to_text)):
                 context[f'in_{i+1}'] = val
                 context[f'in_{i+1}_p'] = p_val
-            
+
             in_labels_indexes = [
                 ('in_op',[0,1,2,3,],),
                 ('in_op_serv',[0,1,],),
@@ -504,11 +607,11 @@ class GenerateReportWidget(widgets.VBox):
                 ('in_no_op',[4,5,],),
                 ('in_total',[0,1,2,3,4,5,],),
             ]
-            
+
             for label,indexes in in_labels_indexes:
                 context[label] = float_to_text(income_data[indexes].sum())
                 context[f'{label}_p'] = float_to_text(income_p_data[indexes].sum())
-            
+
             if is_coop:
                 num_rows = 5
                 out_labels_indexes = [
@@ -529,13 +632,16 @@ class GenerateReportWidget(widgets.VBox):
             for label,indexes in out_labels_indexes:
                 context[label] = float_to_text(expenses_data[indexes].sum())
                 context[f'{label}_p'] = float_to_text(expenses_p_data[indexes].sum())
-                
+
             for i,val,p_val in zip(range(5),investments_data.apply(float_to_text),investments_p_data.apply(float_to_text)):
                 context[f'inv_{i+1}'] = val
                 context[f'inv_{i+1}_p'] = p_val
-            
+
             context['inversiones'] = float_to_text(investments_data.sum())
             
+            for i,val in zip(range(11),expansion_data.apply(float_to_text)):
+                context[f'exp_{i+1}'] = val
+
             # Finish
             if not exists(out_path):
                 os.makedirs(out_path)
@@ -570,13 +676,12 @@ class GenerateReportWidget(widgets.VBox):
         def on_cell_edited(event,grid):
             col,idx,old,new = [event[key] for key in ['column','index','old','new']]
 
-            if col in ['%','Descripción']:
+            if col in ['%','Descripción','Unidad'] or active_tab.value == 'general':
                 changed_df = grid.get_changed_df()
                 changed_df[col][idx] = old
                 grid.df = changed_df
                 return
-            if active_tab.value == 'general':
-                return
+
             try:
                 text_to_float(new)
                 help_html.value = ''
@@ -587,6 +692,9 @@ class GenerateReportWidget(widgets.VBox):
                 help_html.value = format_help
                 return
 
+            if col == 'Valor':
+                return
+            
             in_op_idxs = [
                 'SERVICIOS DE AGUA POTABLE',
                 'SERVICIOS DE ALCANTARILLADO',
@@ -657,9 +765,9 @@ class GenerateReportWidget(widgets.VBox):
             <li>En la siguiente tabla puedes ver los datos, a partir de los cuales se generará el POA.</li>
             <li>Las columnas de valor pueden ser modificadas haciendo doble click sobre la celda</li> 
             <li>El valor ingresado debe ser un número con un punto separando los decimales. Las comas son ignoradas.</li>
-            <li>Todo cambio realizado se verá reflejado actualizará los porcentajes y se verá en el reporte generado.</li>
+            <li>Todo cambio realizado actualizará los porcentajes, los totales y se verá reflejado en el reporte generado.</li>
             </ul> '''[:limit]
-            
+
         def on_out_name_text_change(change):
             out_name_help.value = out_path + '\\' + f'<b>{change["new"]}</b>' + '.docx'
 
@@ -683,9 +791,9 @@ class GenerateReportWidget(widgets.VBox):
         for i in range(len(tab_names)):
             grids.append(qgrid.QGridWidget(df=pd.DataFrame(),show_toolbar=False,))
 
-        for i,val in zip(range(4),['general','ingresos','gastos','inversiones']):
+        for i,val in zip(range(5),['general','ingresos','gastos','inversiones','expansión']):
             grids[i].on('selection_changed',update_active_tab(val))
-            
+
         tab = widgets.Tab([
             grids[0],
             widgets.VBox([
@@ -706,6 +814,10 @@ class GenerateReportWidget(widgets.VBox):
                 total_inv_text,
                 inversiones_text_box,
             ]),
+            widgets.VBox([
+                grids[4],
+                expansion_text_box,
+            ]),
         ])
 
         for i,name in enumerate(tab_names):
@@ -722,15 +834,23 @@ class GenerateReportWidget(widgets.VBox):
                 widgets.HBox([save_profile_button,intro_help_html,]),
             ]),intro_html]),
             widgets.VBox([type_toggle, epsa_dropdown, year_dropdown, order_dropdown,]),
-            widgets.Button(),
+            ant_html,
         ])
         accordion.set_title(0, '1. Datos Generales / Intro')
         accordion.set_title(1, '2. Cargar Datos POA')
         accordion.set_title(2, '3. Antecedentes')
         accordion.selected_index = None
 
+        children = [
+            accordion,
+            widgets.HBox([table_help,info_button]),
+            tab,
+            widgets.HBox([out_name_text,out_name_help]),
+            widgets.HBox([generate_button,generate_random_button,download_tag]),
+            help_html,
+        ])
 
-        super().__init__(children=[accordion,widgets.HBox([table_help,info_button]),tab,widgets.HBox([out_name_text,out_name_help]),widgets.HBox([generate_button,generate_random_button,download_tag]),help_html,], **kwargs)
+        super().__init__(children=children, **kwargs)
         
 class LoadDataWidget(widgets.VBox):   
     def __init__(self, **kwargs):
@@ -779,6 +899,12 @@ class LoadDataWidget(widgets.VBox):
             'inv_equipo',
             'inv_diseno_estudio',
             'inv_otros',
+        ]
+
+        expansion_cols = [
+            'pob_total','pob_ap','pob_alc','con_ap','con_ap_total',
+            'cob_ap','con_alc','con_alc_total','cob_alc','cob_micro',
+            'anc',
         ]
 
         help_html0 = widgets.HTML()
@@ -1005,17 +1131,17 @@ class LoadDataWidget(widgets.VBox):
                     NETWORK_CONNECTED = False
                     button_help.value = '<font color="red">No se pudo establecer conexión con el servidor de datos. Verifica que tienes conexión a internet e intentalo nuevamente.</font>'
                 return
-            
+
             if isinstance(epsas_json,list):
                 cols = ['code','name','state','category']
                 if not exists(data_path):
                     os.makedirs(data_path)
                 pd.DataFrame(epsas_json)[cols].to_excel(epsas_xl_path)
-            
+
             if isinstance(poas_json,list):
                 coop_writer = ExcelWriter(coop_xl_path)
                 muni_writer = ExcelWriter(muni_xl_path)
-                
+
                 poas_clean = dict(coop=[],muni=[])
                 for poa in poas_json:
                     cm_dicts = [poa.get('coop_expense'),poa.get('muni_expense')]
@@ -1032,8 +1158,8 @@ class LoadDataWidget(widgets.VBox):
                 coop_df = pd.DataFrame(poas_clean['coop'])
                 muni_df = pd.DataFrame(poas_clean['muni'])
 
-                cols_lists = [general_cols,income_cols,None,investments_cols]
-                sheet_names = ['general','ingresos','gastos','inversiones']
+                cols_lists = [general_cols,income_cols,None,investments_cols,expansion_cols]
+                sheet_names = ['general','ingresos','gastos','inversiones','metas expansión']
 
                 for cols_list,sn in zip(cols_lists, sheet_names):
                     if sn == 'gastos':
@@ -1048,7 +1174,7 @@ class LoadDataWidget(widgets.VBox):
 
                 coop_writer.save()
                 muni_writer.save()
-                    
+
             if not selected_datasets == []: 
                 button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code><font color="#fcb070">datos</font></code></a> y ahora los puedes usar en las otras aplicaciones! Por ejemplo: <a href="http://localhost:8888/apps/Generar%20Reportes%20POA.ipynb?appmode_scroll=0" target=_><font color="#fcb070">Generar Reportes POA</font></a></font>'
 
