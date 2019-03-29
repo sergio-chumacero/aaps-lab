@@ -848,7 +848,7 @@ class GenerateReportWidget(widgets.VBox):
             widgets.HBox([out_name_text,out_name_help]),
             widgets.HBox([generate_button,generate_random_button,download_tag]),
             help_html,
-        ])
+        ]
 
         super().__init__(children=children, **kwargs)
         
