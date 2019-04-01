@@ -33,12 +33,14 @@ profile_path = join(home_dir,'.profile','profile.json')
 coop_xl_path = join(data_path,'poas_coop.xlsx')
 muni_xl_path = join(data_path,'poas_muni.xlsx')
 epsas_xl_path = join(data_path,'epsas.xlsx')
+variables_xl_path = join(data_path,'variables.xlsx')
+indicators_xl_path = join(data_path,'indicadores.xlsx')
 
 coop_tpl_path = join(tpl_path,'coop_poa_tpl.docx')
 muni_tpl_path = join(tpl_path,'muni_poa_tpl.docx')
 
 server_base_url = 'http://aaps-lab.ml'
-available_datasets = ['EPSAS','POAS']
+available_datasets = ['EPSAS','POAS','INDICADORES','VARIABLES']
 
 class GenerateReportWidget(widgets.VBox):
     def __init__(self, **kwargs):
@@ -869,6 +871,10 @@ class LoadDataWidget(widgets.VBox):
             local_datasets.append('EPSAS')
         if exists(coop_xl_path) and exists(muni_xl_path):
             local_datasets.append('POAS')
+        if exists(indicators_xl_path):
+            local_datasets.append('INDICADORES')
+        if exists(variables_xl_path):
+            local_datasets.append('VARIABLES')
 
         external_datasets = difference(available_datasets,local_datasets)
 
@@ -1108,17 +1114,15 @@ class LoadDataWidget(widgets.VBox):
             selected_datasets = local_datasets_select.value + external_datasets_select.value
             epsas_json, poas_json = None, None
             try:
-                if 'EPSAS' in selected_datasets:
-                    epsas_json = requests.get(f'{server_base_url}/api/epsas/?fields!=id,modified',headers=headers).json()
-                if 'POAS' in selected_datasets:
-                    poas_json = requests.get(f'{server_base_url}/api/poas/?fields!=id,modified',headers=headers).json()
+                response_jsons = {}
+                for set_name, set_key in zip(available_datasets,['epsas','poas','measurements','reports']):
+                    if set_name in selected_datasets:
+                        response_jsons[set_key] = requests.get(f'{server_base_url}/api/{set_key}/?fields!=id,modified',headers=headers).json()
                 INVALID_TOKEN = None
-                if isinstance(epsas_json,dict):
-                    if epsas_json.get('detail') == 'Token inválido.':
-                        INVALID_TOKEN = True
-                if isinstance(poas_json,dict):
-                    if poas_json.get('detail') == 'Token inválido.':
-                        INVALID_TOKEN = True
+                for k,response_json in response_jsons.items():
+                    if isinstance(response_json,dict):
+                        if response_json.get('detail') == 'Token inválido.':
+                            INVALID_TOKEN = True
                 if INVALID_TOKEN:
                     download_help.value = '<font color="red">Credenciales inválidas. Actualiza tus credenciales en el paso 1 y trata de nuevo.</font>'
                     download_data_widget.layout.display = 'none'
@@ -1132,12 +1136,14 @@ class LoadDataWidget(widgets.VBox):
                     button_help.value = '<font color="red">No se pudo establecer conexión con el servidor de datos. Verifica que tienes conexión a internet e intentalo nuevamente.</font>'
                 return
 
+            epsas_json = response_jsons.get('epsas')
             if isinstance(epsas_json,list):
                 cols = ['code','name','state','category']
                 if not exists(data_path):
                     os.makedirs(data_path)
                 pd.DataFrame(epsas_json)[cols].to_excel(epsas_xl_path)
 
+            poas_json = response_jsons.get('poas')
             if isinstance(poas_json,list):
                 coop_writer = ExcelWriter(coop_xl_path)
                 muni_writer = ExcelWriter(muni_xl_path)
@@ -1175,6 +1181,18 @@ class LoadDataWidget(widgets.VBox):
                 coop_writer.save()
                 muni_writer.save()
 
+            variables_json = response_jsons.get('measurements')
+            if isinstance(variables_json,list):
+                if not exists(data_path):
+                    os.makedirs(data_path)
+                pd.DataFrame(variables_json).to_excel(variables_xl_path)
+            
+            indicators_json = response_jsons.get('reports')
+            if isinstance(indicators_json,list):
+                if not exists(data_path):
+                    os.makedirs(data_path)
+                pd.DataFrame(indicators_json).to_excel(indicators_xl_path)
+            
             if not selected_datasets == []: 
                 button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code><font color="#fcb070">datos</font></code></a> y ahora los puedes usar en las otras aplicaciones! Por ejemplo: <a href="http://localhost:8888/apps/Generar%20Reportes%20POA.ipynb?appmode_scroll=0" target=_><font color="#fcb070">Generar Reportes POA</font></a></font>'
 
@@ -1212,5 +1230,6 @@ class LoadDataWidget(widgets.VBox):
             download_data_widget.layout.display = None
             download_button.disabled = False
             load_data_accordion.selected_index = 1
+
         
         super().__init__(children=[load_data_accordion,widgets.HBox([download_button,button_help,])], **kwargs)
