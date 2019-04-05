@@ -1,31 +1,17 @@
-import ipywidgets as widgets
-import os
+import os, json, requests, base64
 from os.path import join, exists, dirname
-import json
-import requests
 from requests.exceptions import ConnectionError
-import qgrid
-import pandas as pd
-from pandas import ExcelWriter
-import ipywidgets as widgets
-import os
-from os.path import join, exists, dirname
-import json
-import requests
-from requests.exceptions import ConnectionError
-import qgrid
-import pandas as pd
-from pandas import ExcelWriter
 from datetime import datetime
-import docx
-import base64
-from docxtpl import DocxTemplate
+import pandas as pd
+import ipywidgets as widgets
+import qgrid
+import docx, docxtpl
 
 home_dir = join(os.environ['USERPROFILE'],'aapslab')
 data_path = join(home_dir,'datos')
+out_path = join(data_path,'reportes')
 
 tpl_path = join(home_dir,'.lib','templates')
-out_path = join(data_path,'reportes')
 mappings_path = join(home_dir,'.lib','mappings')
 
 profile_path = join(home_dir,'.profile','profile.json')
@@ -34,13 +20,22 @@ coop_xl_path = join(data_path,'poas_coop.xlsx')
 muni_xl_path = join(data_path,'poas_muni.xlsx')
 epsas_xl_path = join(data_path,'epsas.xlsx')
 variables_xl_path = join(data_path,'variables.xlsx')
+reports_xl_path = join(data_path,'datos_variables.xlsx')
 indicators_xl_path = join(data_path,'indicadores.xlsx')
+measurements_xl_path = join(data_path,'datos_indicadores.xlsx')
 
 coop_tpl_path = join(tpl_path,'coop_poa_tpl.docx')
 muni_tpl_path = join(tpl_path,'muni_poa_tpl.docx')
 
 server_base_url = 'http://aaps-lab.ml'
+
 available_datasets = ['EPSAS','POAS','INDICADORES','VARIABLES']
+dataset_name_to_keys = dict(
+    EPSAS=['epsas'],
+    POAS=['poas'],
+    INDICADORES=['indicators','measurements'],
+    VARIABLES=['variables','reports'],
+)
 
 class GenerateReportWidget(widgets.VBox):
     def __init__(self, **kwargs):
@@ -866,17 +861,17 @@ class LoadDataWidget(widgets.VBox):
 
         profile_json = None
 
-        local_datasets = []
-        if exists(epsas_xl_path):
-            local_datasets.append('EPSAS')
-        if exists(coop_xl_path) and exists(muni_xl_path):
-            local_datasets.append('POAS')
-        if exists(indicators_xl_path):
-            local_datasets.append('INDICADORES')
-        if exists(variables_xl_path):
-            local_datasets.append('VARIABLES')
-
-        external_datasets = difference(available_datasets,local_datasets)
+        def get_local_datasets():
+            local_datasets = []
+            if exists(epsas_xl_path):
+                local_datasets.append('EPSAS')
+            if exists(coop_xl_path) and exists(muni_xl_path):
+                local_datasets.append('POAS')
+            if exists(indicators_xl_path) and exists(measurements_xl_path):
+                local_datasets.append('INDICADORES')
+            if exists(variables_xl_path) and exists(variables_xl_path):
+                local_datasets.append('VARIABLES')
+            return local_datasets
 
         general_cols = ['epsa','year','order']
         income_cols = ['in_op_ap','in_op_alc','in_op_alc_pozo','in_op_otros','in_financieros','in_no_op_otros']
@@ -959,9 +954,9 @@ class LoadDataWidget(widgets.VBox):
         )
 
         local_datasets_select = widgets.SelectMultiple(
-            options=local_datasets,
+            options=get_local_datasets(),
             value=[],
-            rows=len(local_datasets)+2,
+            rows=len(get_local_datasets())+2,
             description='Conjuntos Locales:',
             disabled=False,
             layout=widgets.Layout(width='100%'),
@@ -969,11 +964,11 @@ class LoadDataWidget(widgets.VBox):
         )
 
         external_datasets_select = widgets.SelectMultiple(
-            options=external_datasets,
+            options=difference(available_datasets,get_local_datasets()),
             value=[],
             description='Conjuntos Externos:',
             disabled=False,
-            rows=len(external_datasets)+2,
+            rows=len(difference(available_datasets,get_local_datasets()))+2,
             layout=widgets.Layout(width='100%'),
             style={'description_width': 'initial'},
         )
@@ -1107,26 +1102,20 @@ class LoadDataWidget(widgets.VBox):
         def on_external_dataset_select_change(change):
             build_overview()
 
+        def get_response(set_key,headers):
+            return requests.get(f'{server_base_url}/api/{set_key}/?fields!=id,modified',headers=headers).json()
+
         def on_download_button_click(b):
             with open(profile_path,'r') as f:
                 token = json.load(f).get('token')
             headers = dict(Authorization=f'Token {token}')
             selected_datasets = local_datasets_select.value + external_datasets_select.value
-            epsas_json, poas_json = None, None
             try:
                 response_jsons = {}
-                for set_name, set_key in zip(available_datasets,['epsas','poas','measurements','reports']):
+                for set_name in list(dataset_name_to_keys):
                     if set_name in selected_datasets:
-                        response_jsons[set_key] = requests.get(f'{server_base_url}/api/{set_key}/?fields!=id,modified',headers=headers).json()
-                INVALID_TOKEN = None
-                for k,response_json in response_jsons.items():
-                    if isinstance(response_json,dict):
-                        if response_json.get('detail') == 'Token inválido.':
-                            INVALID_TOKEN = True
-                if INVALID_TOKEN:
-                    download_help.value = '<font color="red">Credenciales inválidas. Actualiza tus credenciales en el paso 1 y trata de nuevo.</font>'
-                    download_data_widget.layout.display = 'none'
-                    return
+                        for set_key in dataset_name_to_keys[set_name]:
+                            response_jsons[set_key] = get_response(set_key,headers)
             except ConnectionError:
                 try:
                     requests.head('http://www.google.com', verify=False, timeout=5)
@@ -1136,17 +1125,36 @@ class LoadDataWidget(widgets.VBox):
                     button_help.value = '<font color="red">No se pudo establecer conexión con el servidor de datos. Verifica que tienes conexión a internet e intentalo nuevamente.</font>'
                 return
 
+            INVALID_TOKEN = None
+            for k,response_json in response_jsons.items():
+                if isinstance(response_json,dict):
+                    if response_json.get('detail') == 'Token inválido.':
+                        INVALID_TOKEN = True
+            if INVALID_TOKEN:
+                download_help.value = '<font color="red">Credenciales inválidas. Actualiza tus credenciales en el paso 1 y trata de nuevo.</font>'
+                download_data_widget.layout.display = 'none'
+                return
+
+            if response_jsons != {} and not exists(data_path):
+                os.makedirs(data_path)
+            
             epsas_json = response_jsons.get('epsas')
             if isinstance(epsas_json,list):
                 cols = ['code','name','state','category']
-                if not exists(data_path):
-                    os.makedirs(data_path)
                 pd.DataFrame(epsas_json)[cols].to_excel(epsas_xl_path)
+            
+            set_keys = ['indicators','measurements','variables','reports']
+            xl_paths =[indicators_xl_path,measurements_xl_path,variables_xl_path,reports_xl_path]
+            
+            for set_key, xl_path in zip(set_keys,xl_paths):
+                data_json = response_jsons.get(set_key)
+                if isinstance(data_json,list):
+                    pd.DataFrame(data_json).to_excel(xl_path)
 
             poas_json = response_jsons.get('poas')
             if isinstance(poas_json,list):
-                coop_writer = ExcelWriter(coop_xl_path)
-                muni_writer = ExcelWriter(muni_xl_path)
+                coop_writer = pd.ExcelWriter(coop_xl_path)
+                muni_writer = pd.ExcelWriter(muni_xl_path)
 
                 poas_clean = dict(coop=[],muni=[])
                 for poa in poas_json:
@@ -1181,17 +1189,10 @@ class LoadDataWidget(widgets.VBox):
                 coop_writer.save()
                 muni_writer.save()
 
-            variables_json = response_jsons.get('measurements')
-            if isinstance(variables_json,list):
-                if not exists(data_path):
-                    os.makedirs(data_path)
-                pd.DataFrame(variables_json).to_excel(variables_xl_path)
+            local_datasets_select.options = get_local_datasets()
+            external_datasets_select.options=difference(available_datasets,get_local_datasets())
             
-            indicators_json = response_jsons.get('reports')
-            if isinstance(indicators_json,list):
-                if not exists(data_path):
-                    os.makedirs(data_path)
-                pd.DataFrame(indicators_json).to_excel(indicators_xl_path)
+            build_overview()
             
             if not selected_datasets == []: 
                 button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code><font color="#fcb070">datos</font></code></a> y ahora los puedes usar en las otras aplicaciones! Por ejemplo: <a href="http://localhost:8888/apps/Generar%20Reportes%20POA.ipynb?appmode_scroll=0" target=_><font color="#fcb070">Generar Reportes POA</font></a></font>'
@@ -1231,5 +1232,365 @@ class LoadDataWidget(widgets.VBox):
             download_button.disabled = False
             load_data_accordion.selected_index = 1
 
-        
+
+
         super().__init__(children=[load_data_accordion,widgets.HBox([download_button,button_help,])], **kwargs)
+
+
+class GenerateAnualReportWidget(widgets.VBox):
+    def __init__(self,**kwargs):
+
+        prof_name_to_denom = {'Ingeniero':'Ing.', 'Económico':'Lic.',}
+        month_names = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+        month_num_to_name = {k+1:v for k,v in zip(range(12), month_names)}
+
+        column_name_to_verbose = dict(
+            anc='AGUA NO CONTABILIZADA',
+            cob_alc='COBERTURA DE ALCANTARILLADO',
+            cob_ap='COBERTURA DE AGUA POTABLE',
+            cob_micro='COBERTURA DE MICROMEDICIÓN',
+            con_alc='CONEXIONES NUEVAS ALCATARILLADO',
+            con_alc_total='TOTAL CONEXIONES ALCANTARILLADO',
+            con_ap='CONEXIONES NUEVAS DE AGUA POTABLE',
+            con_ap_total='TOTAL CONEXIONES DE AGUA POTABLE',
+            pob_alc='POBLACIÓN CON ALCANTARILLADO',
+            pob_ap='POBLACIÓN CON AGUA POTABLE',
+            pob_total='POBLACIÓN TOTAL',
+        )
+
+        def text_to_float(x):
+            return float(x.replace(',',''))
+        def float_to_text(x):
+            try:
+                return "{:,.2f}".format(x)
+            except TypeError:
+                return "-"
+
+        def get_filtered(df,epsa=None,year=None,cols=None):
+            try:
+                epsa_condition = df.epsa==epsa if epsa else len(rdf.epsa)*True
+                year_condition = df.year==year if year else len(rdf.year)*True
+                columns = cols if cols else list(df)
+                return df[epsa_condition&year_condition][columns]
+            except AttributeError:
+                return df
+
+        def val_diff(a,b):
+            try:
+                return b - a
+            except TypeError:
+                return None
+            
+        def val_perc(prog,ejec):
+            try:
+                return (ejec / prog) * 100
+            except TypeError:
+                return None
+
+        if exists(profile_path):
+            with open(profile_path,'r') as f:
+                profile_json = json.load(f)
+        else:
+            profile_json = {}
+
+        technical_ind_ids = [i+1 for i in range(22)]
+        economical_ind_ids = [i+23 for i in range(10)]
+
+        cat_to_par_min = {cat : f'par_min_{cat}' for cat in ['A','B','C','D',]}
+        cat_to_par_max = {cat : f'par_max_{cat}' for cat in ['A','B','C','D',]}
+
+        def parameters_to_text(par_min,par_max):
+            par_text = f'Entre {par_min} y {par_max}'
+            if par_min == par_max:
+                par_text = str(par_min)
+            if pd.isnull(par_min) and not pd.isnull(par_max):
+                par_text = f'<= al {par_max}'
+            if pd.isnull(par_max) and not pd.isnull(par_min):
+                par_text = f'>= al {par_min}'
+            return par_text
+            
+        report_number = widgets.BoundedIntText(
+            value= profile_json.get('last_report_num',0) + 1,
+            min=0, max=999, step=1,
+            description='Número de reporte:',
+            tooltip='entre 0 y 999',
+            layout=widgets.Layout(width='50%',),
+            style={'description_width': 'initial'},
+        )
+        name_text = widgets.Text(
+            value = profile_json.get('name'),
+            placeholder='Nombre del autor del documento',
+            description='Nombre:',
+            layout=widgets.Layout(width='50%',),
+        )
+        specialty_text = widgets.Text(
+            value = profile_json.get('specialty'),
+            placeholder='Especialidad del profesional',
+            description='Especialidad:',
+            layout=widgets.Layout(width='50%',),
+        )
+        qualification_type = widgets.ToggleButtons(
+            value=profile_json.get('prof'),
+            options=['Ingeniero', 'Económico',],
+            description='Profesión:',
+            button_style='info',
+            tooltips=['Profesional Ingeniero', 'Profesional Económico',],
+        )
+        generate_button = widgets.Button(
+            description='Generar Reporte',
+            button_style='success',
+            tooltip='Generar Reporte',
+            icon='file-text',
+            layout=widgets.Layout(width='300px',height='50px',font_size='20px'),
+        )
+        save_profile_button = widgets.Button(
+            description='Guardar Perfil',
+            button_style='info',
+            tooltip='Generar Reporte',
+            icon='save',
+        ) 
+        date_picker = widgets.DatePicker(
+            value = datetime.now(),
+            description='Fecha:',
+            disabled=False
+        )
+        city_dropdown = widgets.Dropdown(
+            options=['La Paz', 'Santa Cruz', 'Cochabamba'],
+            value=profile_json.get('city'),
+            description='Ciudad:',
+            disabled=False,
+            style={'description_width':'initial'},
+        )
+        epsa_dropdown = widgets.Dropdown(
+            options=[],
+            value=None,
+            description='EPSA:',
+            disabled=False,
+            layout = widgets.Layout(width='50%',display='none'),
+        )
+        year_slider = widgets.IntRangeSlider(
+            value=[2014,2017],
+            min=2014,
+            max=2017,
+            step=1,
+            description='Años:',
+            disabled=False,
+            continuous_update=False,
+            orientation='horizontal',
+            readout=True,
+            readout_format='d',
+            layout=widgets.Layout(width='50%',display='none')
+        )
+        year_dropdown = widgets.Dropdown(
+            options=[],
+            value=None,
+            description='Año:',
+            disabled=False,
+            layout = widgets.Layout(width='50%'),
+        )
+        load_data_help = widgets.HTML()
+        help_html = widgets.HTML()
+        intro_help_html = widgets.HTML()
+        continue_button = widgets.Button(
+            description='CONTINUAR',
+            button_style='info',
+            tooltip='Continuar con el informe.',
+            icon='play',
+            layout=widgets.Layout(width='300px',height='50px',font_size='20px',display='none'),
+        )
+
+        load_widget = aaps_widgets.LoadDataWidget(layout=widgets.Layout(display='none'))
+
+        load_data_button = widgets.Button(
+            description='Cargar Datos',
+            button_style='info',
+            tooltip='Cargar datos para el informe.',
+            icon='upload',
+            layout=widgets.Layout(width='300px',height='50px',font_size='20px',display='none'),
+        )
+
+        def build_intro():
+            num = report_number.value
+            prof = prof_name_to_denom[qualification_type.value] if qualification_type.value else ''
+            name = name_text.value
+            specialty = specialty_text.value
+            date = date_picker.value
+            city = city_dropdown.value
+            return f'''<div style="background-color: #ddffff;border-left: 6px solid #2196F3; padding: 0.01em 16px">
+            INFORME AAPS/DER/INF/{num:03d}/{date.year}</br>
+            {prof} {name.title()}</br>
+            PROFESIONAL {prof.upper()} {specialty.upper()}</br>
+            {city}, {date.day} de {month_num_to_name[date.month]} de {date.year}
+            </div>'''
+
+        intro_html = widgets.HTML(value=build_intro())
+
+        epsas_help_grid = qgrid.QGridWidget(df=pd.DataFrame())
+        indicators_help_grid = qgrid.QGridWidget(df=pd.DataFrame())
+        measurements_help_grid = qgrid.QGridWidget(df=pd.DataFrame())
+        reports_help_grid = qgrid.QGridWidget(df=pd.DataFrame())
+        expansion_help_grid = qgrid.QGridWidget(df=pd.DataFrame())
+
+        def update_intro(change):
+            intro_html.value = build_intro()
+
+        def on_save_profile_button_click(b):
+            if profile_json:
+                profile_json['name'] = name_text.value
+                profile_json['prof'] = qualification_type.value
+                profile_json['specialty'] = specialty_text.value
+                profile_json['last_report_num'] = report_number.value
+                profile_json['city'] = city_dropdown.value
+
+                with open(profile_path,'w') as f:
+                    json.dump(profile_json,f)
+
+                intro_help_html.value = 'Perfil guardado!'
+
+        def on_continue_button_click(b):
+            if all([exists(path) for path in xl_paths]):
+                load_data_help.value = ''
+                epsas_help_grid.df = epsas_df = pd.read_excel(epsas_xl_path)
+                indicators_help_grid.df = pd.read_excel(indicators_xl_path)
+                measurements_help_grid.df = pd.read_excel(measurements_xl_path)
+                reports_help_grid.df = pd.read_excel(reports_xl_path)
+                
+                coop_df = pd.concat([pd.read_excel(coop_xl_path,sheet_name=sn) for sn in sheet_names],axis=1)
+                muni_df = pd.concat([pd.read_excel(muni_xl_path,sheet_name=sn) for sn in sheet_names],axis=1)
+                expansion_help_grid.df = coop_df.append(muni_df)
+                
+                epsa_dropdown.options = list(epsas_help_grid.df.code)
+                epsa_dropdown.layout.display = None
+                year_slider.layout.display = None
+                load_data_button.layout.display = None
+                load_widget.layout.display = 'none'
+                continue_button.layout.display = 'none'
+
+        def on_load_data_button_click(b):
+            epsa = epsa_dropdown.value
+            years = list(range(year_slider.value[0],year_slider.value[1]+1))
+            
+            epsas_df = epsas_help_grid.df
+            indicators_df = indicators_help_grid.df
+            mdf = measurements_help_grid.df
+            rdf = reports_help_grid.df
+            edf = expansion_help_grid.df
+            
+            category = epsas_df[epsas_df.code==epsa].category.iloc[0]
+
+            tec_df = indicators_df[indicators_df.ind_id.isin(technical_ind_ids)].copy()
+            eco_df = indicators_df[indicators_df.ind_id.isin(economical_ind_ids)].copy()
+
+            tec_df['par_text'] = [parameters_to_text(p_min,p_max) for p_min,p_max in zip(tec_df[cat_to_par_min[category]],tec_df[cat_to_par_max[category]])]
+            eco_df['par_text'] = [parameters_to_text(p_min,p_max) for p_min,p_max in zip(eco_df[cat_to_par_min[category]],eco_df[cat_to_par_max[category]])]
+
+            tec_measurements_cols = [f'ind{ind_id}' for ind_id in technical_ind_ids]
+            eco_measurements_cols = [f'ind{ind_id}' for ind_id in economical_ind_ids]
+
+            for year in years:
+                tec_df[str(year)] = list(mdf[(mdf.epsa==epsa)&(mdf.year==year)][tec_measurements_cols].iloc[0])
+                eco_df[str(year)] = list(mdf[(mdf.epsa==epsa)&(mdf.year==year)][eco_measurements_cols].iloc[0])
+
+            indicators_cols = ['name','unit','par_text'] + [str(y) for y in years]
+            grids[0].df = tec_df[indicators_cols]
+            grids[1].df = eco_df[indicators_cols]
+            
+            sheet_names = ['general','metas expansión']
+            expansion_cols = ['pob_total','pob_ap','pob_alc','con_ap','con_ap_total','cob_ap','con_alc','con_alc_total','cob_alc','cob_micro','anc']
+            executed_vals = len(expansion_cols)*[None]
+
+            expansion_df = get_filtered(edf,epsa,years[-1],expansion_cols)
+
+            if expansion_df.empty:
+                expansion_df = expansion_df.append(pd.DataFrame([[None]*len(expansion_cols)],columns=expansion_cols))
+
+            expansion_df.columns = [column_name_to_verbose[cn] for cn in expansion_cols]
+            expansion_df = expansion_df.transpose().copy()
+
+            expansion_df.columns= ['programado (POA)']
+
+            try:
+                expansion_vals_from_reports = list(get_filtered(rdf,epsa,years[-1],[f'v{vid}' for vid in [22,23,24,17,18,]]).iloc[0])
+            except IndexError:
+                expansion_vals_from_reports = [None] * 5
+
+            for i,val in zip([0,1,2,4,7],expansion_vals_from_reports):
+                executed_vals[i] = val
+
+            try:
+                expansion_vals_from_measurements =list(get_filtered(mdf,epsa,years[-1],['ind7','ind8','ind9','ind18']).iloc[0])
+            except IndexError:
+                expansion_vals_from_measurements = [None] * 4
+
+            for i,val in zip([5,8,9,10],expansion_vals_from_measurements):
+                executed_vals[i] = val
+
+            try:
+                executed_vals[3] = (get_filtered(rdf,epsa,years[-1],['v17']).iloc[0] - get_filtered(rdf,epsa,years[-2],['v17']).iloc[0]).iloc[0]
+                executed_vals[6] = (get_filtered(rdf,epsa,years[-1],['v18']).iloc[0] - get_filtered(rdf,epsa,years[-2],['v18']).iloc[0]).iloc[0]
+            except IndexError:
+                pass
+
+            expansion_df['ejecutado'] = executed_vals
+            expansion_df['diferencia'] = expansion_df.apply(lambda row: val_diff(row['programado (POA)'],row['ejecutado']), axis=1)
+            expansion_df['%'] = expansion_df.apply(lambda row: val_perc(row['programado (POA)'],row['ejecutado']), axis=1)
+
+            for col in ['programado (POA)','ejecutado','diferencia','%']:
+                expansion_df[col] = expansion_df[col].apply(float_to_text)
+                
+            grids[2].df = expansion_df
+            
+        for widg in [report_number,city_dropdown,qualification_type,name_text,specialty_text,date_picker]:
+            widg.observe(update_intro,names='value')
+
+        save_profile_button.on_click(on_save_profile_button_click)
+        continue_button.on_click(on_continue_button_click)
+        load_data_button.on_click(on_load_data_button_click)
+
+        accordion = widgets.Accordion([
+            widgets.HBox([widgets.VBox([
+                name_text,
+                qualification_type,
+                specialty_text,
+                report_number,
+                city_dropdown,
+                date_picker,
+                widgets.HBox([save_profile_button,intro_help_html,]),
+            ]),intro_html]),
+            widgets.VBox([epsa_dropdown,year_slider,load_data_help,load_widget,continue_button,load_data_button]),
+        ])
+        accordion.set_title(0, '1. Datos Generales / Intro')
+        accordion.set_title(1, '2. Cargar Datos')
+        accordion.selected_index = None
+
+        grids = []
+        for i in range(3):
+            grids.append(qgrid.QGridWidget(df=pd.DataFrame()))
+
+        tab = widgets.Tab(grids)
+
+        tab.set_title(0,'Indicadores Técnicos')
+        tab.set_title(1,'Indicadores Económicos')
+        tab.set_title(2,'Metas de Expansión')
+
+        if not all([exists(path) for path in xl_paths]):
+            load_data_help.value = 'Parece que no cuentas con Datos... Descarga o Actualiza los conjuntos de datos "EPSAS" e "INDICADORES", "VARIABLES" y "POAS" con la siguiente herramienta y luego haz click en el botón "CONTINUAR".'
+            load_widget.layout.display = None
+            continue_button.layout.display = None
+        else:
+            load_data_help.value = ''
+            epsas_help_grid.df = epsas_df = pd.read_excel(epsas_xl_path)
+            indicators_help_grid.df = pd.read_excel(indicators_xl_path)
+            measurements_help_grid.df = pd.read_excel(measurements_xl_path)
+            reports_help_grid.df = pd.read_excel(reports_xl_path)
+                
+            coop_df = pd.concat([pd.read_excel(coop_xl_path,sheet_name=sn) for sn in sheet_names],axis=1)
+            muni_df = pd.concat([pd.read_excel(muni_xl_path,sheet_name=sn) for sn in sheet_names],axis=1)
+            expansion_help_grid.df = coop_df.append(muni_df)
+            
+            epsa_dropdown.options = list(epsas_help_grid.df.code)
+            epsa_dropdown.layout.display = None
+            year_slider.layout.display = None
+            load_data_button.layout.display = None
+
+        super().__init__(children=[accordion,tab,help_html],**kwargs)
