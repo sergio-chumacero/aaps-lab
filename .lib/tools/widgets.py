@@ -24,8 +24,11 @@ reports_xl_path = join(data_path,'datos_variables.xlsx')
 indicators_xl_path = join(data_path,'indicadores.xlsx')
 measurements_xl_path = join(data_path,'datos_indicadores.xlsx')
 
+xl_paths = [coop_xl_path,muni_xl_path,epsas_xl_path,variables_xl_path,reports_xl_path,indicators_xl_path,measurements_xl_path]
+
 coop_tpl_path = join(tpl_path,'coop_poa_tpl.docx')
 muni_tpl_path = join(tpl_path,'muni_poa_tpl.docx')
+anual_tpl_path = join(tpl_path,'anual_tpl.docx')
 
 server_base_url = 'http://aaps-lab.ml'
 
@@ -525,7 +528,7 @@ class GenerateReportWidget(widgets.VBox):
                 tpl_path = muni_tpl_path
                 is_coop, is_muni = False, True
 
-            doc = DocxTemplate(tpl_path)
+            doc = docxtpl.DocxTemplate(tpl_path)
 
             if not random:
                 income_data, expenses_data, investments_data = [grids[i+1].get_changed_df()['Valor (Bs.)'].apply(text_to_float) for i in range(3)]
@@ -1280,7 +1283,7 @@ class GenerateAnualReportWidget(widgets.VBox):
                 return b - a
             except TypeError:
                 return None
-            
+
         def val_perc(prog,ejec):
             try:
                 return (ejec / prog) * 100
@@ -1308,7 +1311,7 @@ class GenerateAnualReportWidget(widgets.VBox):
             if pd.isnull(par_max) and not pd.isnull(par_min):
                 par_text = f'>= al {par_min}'
             return par_text
-            
+
         report_number = widgets.BoundedIntText(
             value= profile_json.get('last_report_num',0) + 1,
             min=0, max=999, step=1,
@@ -1337,7 +1340,7 @@ class GenerateAnualReportWidget(widgets.VBox):
             tooltips=['Profesional Ingeniero', 'Profesional Económico',],
         )
         generate_button = widgets.Button(
-            description='Generar Reporte',
+            description='Generar Informe Anual',
             button_style='success',
             tooltip='Generar Reporte',
             icon='file-text',
@@ -1368,25 +1371,12 @@ class GenerateAnualReportWidget(widgets.VBox):
             disabled=False,
             layout = widgets.Layout(width='50%',display='none'),
         )
-        year_slider = widgets.IntRangeSlider(
-            value=[2014,2017],
-            min=2014,
-            max=2017,
-            step=1,
-            description='Años:',
-            disabled=False,
-            continuous_update=False,
-            orientation='horizontal',
-            readout=True,
-            readout_format='d',
-            layout=widgets.Layout(width='50%',display='none')
-        )
         year_dropdown = widgets.Dropdown(
             options=[],
             value=None,
             description='Año:',
             disabled=False,
-            layout = widgets.Layout(width='50%'),
+            layout=widgets.Layout(width='50%',display='none')
         )
         load_data_help = widgets.HTML()
         help_html = widgets.HTML()
@@ -1399,7 +1389,7 @@ class GenerateAnualReportWidget(widgets.VBox):
             layout=widgets.Layout(width='300px',height='50px',font_size='20px',display='none'),
         )
 
-        load_widget = aaps_widgets.LoadDataWidget(layout=widgets.Layout(display='none'))
+        load_widget = LoadDataWidget(layout=widgets.Layout(display='none'))
 
         load_data_button = widgets.Button(
             description='Cargar Datos',
@@ -1408,6 +1398,16 @@ class GenerateAnualReportWidget(widgets.VBox):
             icon='upload',
             layout=widgets.Layout(width='300px',height='50px',font_size='20px',display='none'),
         )
+
+        out_name_text = widgets.Text(
+            value=f'informe_anual',
+            description='Nombre del archivo:',
+            disabled=False,
+            tooltip='Nombre del archivo que será generado. Por ejemplo: informe_anual.docx',
+            layout=widgets.Layout(width='400px'),
+            style={'description_width': '165px'},
+        )
+        out_name_help = widgets.HTML(value=f'{out_path}\\<b>{out_name_text.value}</b>.docx')
 
         def build_intro():
             num = report_number.value
@@ -1424,6 +1424,7 @@ class GenerateAnualReportWidget(widgets.VBox):
             </div>'''
 
         intro_html = widgets.HTML(value=build_intro())
+        download_tag = widgets.HTML()
 
         epsas_help_grid = qgrid.QGridWidget(df=pd.DataFrame())
         indicators_help_grid = qgrid.QGridWidget(df=pd.DataFrame())
@@ -1454,28 +1455,33 @@ class GenerateAnualReportWidget(widgets.VBox):
                 indicators_help_grid.df = pd.read_excel(indicators_xl_path)
                 measurements_help_grid.df = pd.read_excel(measurements_xl_path)
                 reports_help_grid.df = pd.read_excel(reports_xl_path)
-                
+
+                sheet_names = ['general','metas expansión']
                 coop_df = pd.concat([pd.read_excel(coop_xl_path,sheet_name=sn) for sn in sheet_names],axis=1)
                 muni_df = pd.concat([pd.read_excel(muni_xl_path,sheet_name=sn) for sn in sheet_names],axis=1)
                 expansion_help_grid.df = coop_df.append(muni_df)
-                
+
                 epsa_dropdown.options = list(epsas_help_grid.df.code)
                 epsa_dropdown.layout.display = None
-                year_slider.layout.display = None
+                
+                year_dropdown.options = list(measurements_help_grid.df.year.unique())
+                year_dropdown.layout.display = None
+                
                 load_data_button.layout.display = None
                 load_widget.layout.display = 'none'
                 continue_button.layout.display = 'none'
 
         def on_load_data_button_click(b):
             epsa = epsa_dropdown.value
-            years = list(range(year_slider.value[0],year_slider.value[1]+1))
-            
+            year = year_dropdown.value
+            years = list(range(year-2,year+1))
+
             epsas_df = epsas_help_grid.df
             indicators_df = indicators_help_grid.df
             mdf = measurements_help_grid.df
             rdf = reports_help_grid.df
             edf = expansion_help_grid.df
-            
+
             category = epsas_df[epsas_df.code==epsa].category.iloc[0]
 
             tec_df = indicators_df[indicators_df.ind_id.isin(technical_ind_ids)].copy()
@@ -1483,6 +1489,9 @@ class GenerateAnualReportWidget(widgets.VBox):
 
             tec_df['par_text'] = [parameters_to_text(p_min,p_max) for p_min,p_max in zip(tec_df[cat_to_par_min[category]],tec_df[cat_to_par_max[category]])]
             eco_df['par_text'] = [parameters_to_text(p_min,p_max) for p_min,p_max in zip(eco_df[cat_to_par_min[category]],eco_df[cat_to_par_max[category]])]
+            
+            tec_df['Análisis'] = [''] * len(technical_ind_ids)
+            eco_df['Análisis'] = [''] * len(economical_ind_ids)
 
             tec_measurements_cols = [f'ind{ind_id}' for ind_id in technical_ind_ids]
             eco_measurements_cols = [f'ind{ind_id}' for ind_id in economical_ind_ids]
@@ -1491,10 +1500,10 @@ class GenerateAnualReportWidget(widgets.VBox):
                 tec_df[str(year)] = list(mdf[(mdf.epsa==epsa)&(mdf.year==year)][tec_measurements_cols].iloc[0])
                 eco_df[str(year)] = list(mdf[(mdf.epsa==epsa)&(mdf.year==year)][eco_measurements_cols].iloc[0])
 
-            indicators_cols = ['name','unit','par_text'] + [str(y) for y in years]
+            indicators_cols = ['name','unit','par_text'] + [str(y) for y in years] + ['Análisis']
             grids[0].df = tec_df[indicators_cols]
             grids[1].df = eco_df[indicators_cols]
-            
+
             sheet_names = ['general','metas expansión']
             expansion_cols = ['pob_total','pob_ap','pob_alc','con_ap','con_ap_total','cob_ap','con_alc','con_alc_total','cob_alc','cob_micro','anc']
             executed_vals = len(expansion_cols)*[None]
@@ -1537,15 +1546,95 @@ class GenerateAnualReportWidget(widgets.VBox):
 
             for col in ['programado (POA)','ejecutado','diferencia','%']:
                 expansion_df[col] = expansion_df[col].apply(float_to_text)
-                
+
             grids[2].df = expansion_df
+
+        def on_generate_button_click(b):
+            doc = docxtpl.DocxTemplate(anual_tpl_path)
+            year = year_dropdown.value
+            years = [str(y) for y in range(year-2,year+1)]
+
+            ind_t_1_data,ind_t_2_data,ind_t_3_data = [grids[0].get_changed_df()[y] for y in years]
+            ind_e_1_data,ind_e_2_data,ind_e_3_data = [grids[1].get_changed_df()[y] for y in years]
+            exp_p_data,exp_e_data,exp_d_data,exp_r_data = [grids[2].get_changed_df()[c] for c in ['programado (POA)','ejecutado','diferencia','%']]
+            ind_t_p_data = grids[0].get_changed_df()['Análisis']
+            ind_e_p_data = grids[1].get_changed_df()['Análisis']
+
+            # Intro
+            date = date_picker.value
+            prof = qualification_type.value if qualification_type.value else ''
+            specialty = specialty_text.value.upper() if specialty_text.value else ''
+            denom = prof_name_to_denom[prof] if prof else ''
+            name = name_text.value.title() if name_text.value else ''
+
+            context = dict(
+                prof=prof.upper(),
+                day=str(date.day),
+                month=month_num_to_name[date.month],
+                year=str(date.year),
+                year_n=str(year),
+                year_p=str(year-1),
+                year_pp=str(year-2),
+                denom=denom,
+                name=name,
+                report_num=f'{report_number.value:03d}',
+                city=city_dropdown.value,
+                specialty=specialty,
+            )
+
+            for j,data in enumerate([ind_t_1_data,ind_t_2_data,ind_t_3_data]):
+                for i,val in enumerate(data):
+                    context[f'ind_t_{j+1}_{i+1}'] = val
+                    
+            for j,data in enumerate([ind_e_1_data,ind_e_2_data,ind_e_3_data]):
+                for i,val in enumerate(data):
+                    context[f'ind_e_{j+1}_{i+1}'] = val
+                    
+            for pre,data in zip(['p','e','d','r'],[exp_p_data,exp_e_data,exp_d_data,exp_r_data]):
+                for i,val in enumerate(data):
+                    context[f'exp_{pre}_{i+1}'] = val
+                    
+            for i,val in enumerate(ind_t_p_data):
+                context[f'ind_t_{i+1}_p'] = val
+            for i,val in enumerate(ind_e_p_data):
+                context[f'ind_e_{i+1}_p'] = val
+
+            # Finish
+            if not exists(out_path):
+                os.makedirs(out_path)
+
+            doc.render(context)
+            doc.save(join(out_path,f"{out_name_text.value}.docx"))
+
+            with open(join(out_path,f'{out_name_text.value}.docx'),'rb') as f:
+                b64 = base64.b64encode(f.read())
+
+            help_html.value = f'''
+            Informe generado y guardado en la carpeta de <font color="#ff7823"><a href="http://localhost:8888/tree/datos/reportes" target="_blank"><code>datos/reportes</code></a></font>!
+            Puedes descargarlos desde ahí, acceder al archivo en tu ordenador o descargarlos haciendo click en el botón de arriba.
+            '''
+            download_tag.value = f'<a class="jupyter-button mod-info" style="line-height: 50px; height:50px" download="{out_name_text.value}.docx" href="data:text/csv;base64,{b64.decode()}" target="_blank"><i class="fa fa-download"></i>Descargar</a>'
+
+        def on_out_name_text_change(change):
+            out_name_help.value = out_path + '\\' + f'<b>{change["new"]}</b>' + '.docx'
             
+        def on_cell_edited(event,grid):
+            col,idx,old,new = [event[key] for key in ['column','index','old','new']]
+
+            if col != 'Análisis':
+                changed_df = grid.get_changed_df()
+                changed_df[col][idx] = old
+                grid.df = changed_df
+                return
+
         for widg in [report_number,city_dropdown,qualification_type,name_text,specialty_text,date_picker]:
             widg.observe(update_intro,names='value')
 
         save_profile_button.on_click(on_save_profile_button_click)
         continue_button.on_click(on_continue_button_click)
         load_data_button.on_click(on_load_data_button_click)
+        generate_button.on_click(on_generate_button_click)
+        out_name_text.observe(on_out_name_text_change,names='value')
 
         accordion = widgets.Accordion([
             widgets.HBox([widgets.VBox([
@@ -1557,7 +1646,7 @@ class GenerateAnualReportWidget(widgets.VBox):
                 date_picker,
                 widgets.HBox([save_profile_button,intro_help_html,]),
             ]),intro_html]),
-            widgets.VBox([epsa_dropdown,year_slider,load_data_help,load_widget,continue_button,load_data_button]),
+            widgets.VBox([epsa_dropdown,year_dropdown,load_data_help,load_widget,continue_button,load_data_button]),
         ])
         accordion.set_title(0, '1. Datos Generales / Intro')
         accordion.set_title(1, '2. Cargar Datos')
@@ -1567,6 +1656,8 @@ class GenerateAnualReportWidget(widgets.VBox):
         for i in range(3):
             grids.append(qgrid.QGridWidget(df=pd.DataFrame()))
 
+        qgrid.on('cell_edited',on_cell_edited)
+            
         tab = widgets.Tab(grids)
 
         tab.set_title(0,'Indicadores Técnicos')
@@ -1583,14 +1674,26 @@ class GenerateAnualReportWidget(widgets.VBox):
             indicators_help_grid.df = pd.read_excel(indicators_xl_path)
             measurements_help_grid.df = pd.read_excel(measurements_xl_path)
             reports_help_grid.df = pd.read_excel(reports_xl_path)
-                
+
+            sheet_names = ['general','metas expansión']
             coop_df = pd.concat([pd.read_excel(coop_xl_path,sheet_name=sn) for sn in sheet_names],axis=1)
             muni_df = pd.concat([pd.read_excel(muni_xl_path,sheet_name=sn) for sn in sheet_names],axis=1)
             expansion_help_grid.df = coop_df.append(muni_df)
-            
+
             epsa_dropdown.options = list(epsas_help_grid.df.code)
             epsa_dropdown.layout.display = None
-            year_slider.layout.display = None
+            
+            year_dropdown.options = list(measurements_help_grid.df.year.unique())
+            year_dropdown.layout.display = None
+            
             load_data_button.layout.display = None
+            
+        children = [
+            accordion,
+            tab,
+            widgets.HBox([out_name_text,out_name_help,]),
+            widgets.HBox([generate_button,download_tag,]),
+            help_html
+        ]
 
-        super().__init__(children=[accordion,tab,help_html],**kwargs)
+        super().__init__(children=children,**kwargs)
