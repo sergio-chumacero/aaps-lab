@@ -1,5 +1,5 @@
 import os, json, requests, base64
-from os.path import join, exists, dirname
+from os.path import join, exists, dirname, abspath
 from requests.exceptions import ConnectionError
 from datetime import datetime
 import pandas as pd
@@ -7,7 +7,8 @@ import ipywidgets as widgets
 import qgrid
 import docx, docxtpl
 
-home_dir = join(os.environ['USERPROFILE'],'aapslab')
+home_dir = dirname(dirname(dirname(abspath(__file__))))
+
 data_path = join(home_dir,'datos')
 out_path = join(data_path,'reportes')
 
