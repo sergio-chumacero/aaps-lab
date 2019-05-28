@@ -33,6 +33,17 @@ anual_tpl_path = join(tpl_path,'anual_tpl.docx')
 
 server_base_url = 'http://aaps-lab.ml'
 
+api_set_keys = ['epsas','poas','indicators','measurements','variables','reports']
+
+set_key_to_verbose = dict(
+    epsas = 'EPSAs',
+    poas = 'POAs',
+    indicators = 'Indicadores (info)',
+    measurements = 'Indicadores (datos)',
+    variables = 'Variables (info)',
+    reports = 'Variables (datos)',
+)
+
 available_datasets = ['EPSAS','POAS','INDICADORES','VARIABLES']
 dataset_name_to_keys = dict(
     EPSAS=['epsas'],
@@ -853,9 +864,8 @@ class GenerateReportWidget(widgets.VBox):
 
         super().__init__(children=children, **kwargs)
         
-class LoadDataWidget(widgets.VBox):   
-    def __init__(self, **kwargs):
-        
+class LoadDataWidget(widgets.VBox):
+    def __init__(self,**kwargs):
         def intersection(a,b):
             return list(set(a)&set(b))
         def difference(a,b):
@@ -985,9 +995,37 @@ class LoadDataWidget(widgets.VBox):
             layout=widgets.Layout(width='300px',height='50px',font_size='20px'),
         )
 
+        progress_widgets = dict()
+        progress_widgets_html = dict()
+        for set_key in api_set_keys:
+            progress_widgets[set_key] = widgets.IntProgress(
+                value=0, min=0, max=100, step=1,
+                description=f'{set_key_to_verbose[set_key]}:',
+                bar_style='info',
+                orientation='horizontal',
+                style = dict(description_width='140px', width='50%'),
+                layout = widgets.Layout(display='none'),
+            )
+            progress_widgets_html[set_key] = widgets.HTML(
+                value = '0 kb / ?? (0%)',
+                layout = widgets.Layout(display='none')
+            )
+            
+
         def build_overview():
             lds = local_datasets_select.value
             eds = external_datasets_select.value
+            
+            ds_keys = []
+            for l in [dataset_name_to_keys[ds_name] for ds_name in lds + eds]:
+                ds_keys += l
+                
+            for ds_key in api_set_keys:
+                progress_widgets[ds_key].layout.display = 'none'
+                progress_widgets_html[ds_key].layout.display='none'
+            for ds_key in ds_keys:
+                progress_widgets[ds_key].layout.display = None
+                progress_widgets_html[ds_key].layout.display = None
 
             lds_enum =  '<ol>' + ''.join([f'<li>{x}</li>' for x in lds]) + '</ol>'
             eds_enum =  '<ol>' + ''.join([f'<li>{x}</li>' for x in eds]) + '</ol>'
@@ -1018,9 +1056,11 @@ class LoadDataWidget(widgets.VBox):
             help_html,
         ], layout=widgets.Layout(display='none'))
 
+        progress_box = widgets.VBox([widgets.HBox([progress_widgets[sk],progress_widgets_html[sk]]) for sk in api_set_keys])
+
         download_data_widget = widgets.VBox(children=[
             widgets.HBox([local_datasets_select,external_datasets_select,]),
-            overview_html,
+            widgets.HBox([overview_html,progress_box]),
         ], layout=widgets.Layout(display='none'))
 
         def set_help_html(username, password, show_pass):
@@ -1107,7 +1147,22 @@ class LoadDataWidget(widgets.VBox):
             build_overview()
 
         def get_response(set_key,headers):
-            return requests.get(f'{server_base_url}/api/{set_key}/?fields!=id,modified',headers=headers).json()
+            with requests.get(f'{server_base_url}/api/{set_key}/?fields!=id,modified',headers=headers,stream=True) as r:
+                content_length = int(r.headers.get('Content-length'))
+                c_size = content_length/100
+                w = progress_widgets[set_key]
+                w_html = progress_widgets_html[set_key]
+                w.value = 0
+                w_html.value = f'0 kb / {"{:,.0f}".format(content_length/1000)} kb (0%)'
+                b_json = bytes()
+                downloaded = 0
+                for chunk in r.iter_content(chunk_size=int(c_size)):
+                    w.value += 1
+                    downloaded = downloaded + c_size if downloaded + c_size < content_length else content_length
+                    w_html.value = f'{"{:,.0f}".format(downloaded/1000)} kb / {"{:,.0f}".format(content_length/1000)} kb ({w.value}%)'
+                    b_json += chunk
+                    
+            return json.loads(b_json.decode('utf-8'))
 
         def on_download_button_click(b):
             with open(profile_path,'r') as f:
@@ -1141,15 +1196,15 @@ class LoadDataWidget(widgets.VBox):
 
             if response_jsons != {} and not exists(data_path):
                 os.makedirs(data_path)
-            
+
             epsas_json = response_jsons.get('epsas')
             if isinstance(epsas_json,list):
                 cols = ['code','name','state','category']
                 pd.DataFrame(epsas_json)[cols].to_excel(epsas_xl_path)
-            
+
             set_keys = ['indicators','measurements','variables','reports']
             xl_paths =[indicators_xl_path,measurements_xl_path,variables_xl_path,reports_xl_path]
-            
+
             for set_key, xl_path in zip(set_keys,xl_paths):
                 data_json = response_jsons.get(set_key)
                 if isinstance(data_json,list):
@@ -1195,9 +1250,9 @@ class LoadDataWidget(widgets.VBox):
 
             local_datasets_select.options = get_local_datasets()
             external_datasets_select.options=difference(available_datasets,get_local_datasets())
-            
+
             build_overview()
-            
+
             if not selected_datasets == []: 
                 button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code><font color="#fcb070">datos</font></code></a> y ahora los puedes usar en las otras aplicaciones! Por ejemplo: <a href="http://localhost:8888/apps/Generar%20Reportes%20POA.ipynb?appmode_scroll=0" target=_><font color="#fcb070">Generar Reportes POA</font></a></font>'
 
@@ -1236,9 +1291,7 @@ class LoadDataWidget(widgets.VBox):
             download_button.disabled = False
             load_data_accordion.selected_index = 1
 
-
-
-        super().__init__(children=[load_data_accordion,widgets.HBox([download_button,button_help,])], **kwargs)
+        super().__init__(children=[load_data_accordion,widgets.HBox([download_button,button_help,])],**kwargs)
 
 
 class GenerateAnualReportWidget(widgets.VBox):
