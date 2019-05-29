@@ -1,9 +1,13 @@
-import os, json, requests, base64
-from os.path import join, exists, dirname, abspath
+import zipfile, kml2geojson
+import os, stat, json, requests, base64
 from requests.exceptions import ConnectionError
+from os.path import exists, join, dirname, abspath
+import traitlets
+from ipywidgets import widgets
+from tkinter import Tk, filedialog
+import ipyleaflet as leaflet
 from datetime import datetime
 import pandas as pd
-import ipywidgets as widgets
 import qgrid
 import docx, docxtpl
 
@@ -11,6 +15,11 @@ home_dir = dirname(dirname(dirname(abspath(__file__))))
 
 data_path = join(home_dir,'datos')
 out_path = join(data_path,'reportes')
+
+src_supply_path = join(data_path,'areas_cobertura')
+dst_supply_path = join(data_path,'cobertura_geojson')
+
+state_names = ['BENI','LA PAZ','CHUQUISACA','COCHABAMBA','SANTA CRUZ','TARIJA','POTOSI','PANDO','ORURO']
 
 tpl_path = join(home_dir,'.lib','templates')
 mappings_path = join(home_dir,'.lib','mappings')
@@ -51,6 +60,16 @@ dataset_name_to_keys = dict(
     INDICADORES=['indicators','measurements'],
     VARIABLES=['variables','reports'],
 )
+
+def rmtree(top):
+    for root, dirs, files in os.walk(top, topdown=False):
+        for name in files:
+            filename = os.path.join(root, name)
+            os.chmod(filename, stat.S_IWUSR)
+            os.remove(filename)
+        for name in dirs:
+            os.rmdir(os.path.join(root, name))
+    os.rmdir(top)
 
 class GenerateReportWidget(widgets.VBox):
     def __init__(self, **kwargs):
@@ -864,7 +883,7 @@ class GenerateReportWidget(widgets.VBox):
 
         super().__init__(children=children, **kwargs)
         
-class LoadDataWidget(widgets.VBox):
+class DataManagementWidget(widgets.VBox):
     def __init__(self,**kwargs):
         def intersection(a,b):
             return list(set(a)&set(b))
@@ -1010,7 +1029,36 @@ class LoadDataWidget(widgets.VBox):
                 value = '0 kb / ?? (0%)',
                 layout = widgets.Layout(display='none')
             )
-            
+
+
+
+        class SelectFileButton(widgets.Button):
+            """A file widget that leverages tkinter.filedialog."""
+
+            def __init__(self):
+                super(SelectFileButton, self).__init__()
+                self.add_traits(file=traitlets.traitlets.Unicode())
+                self.description = "Cargar Archivo"
+                self.tooltip = 'Carga un archivo desde tu sistema local.'
+                self.icon = "file-archive-o"
+                self.button_style = "info"
+                self.layout= widgets.Layout(width='300px',height='50px',font_size='20px')
+
+        select_file_button = SelectFileButton()
+        select_file_html = widgets.HTML()
+
+        upload_supply_button = widgets.Button(
+            description='Subir al Sistema',
+            disabled=True,
+            button_style='success',
+            tooltip='Carga un archivo primero.',
+            icon='cloud-upload',
+            layout=widgets.Layout(width='300px',height='50px',font_size='20px'),
+        )
+        upload_supply_button_html = widgets.HTML()
+
+        center = [-17.426124873632727, -63.243896886706366]
+        my_map = leaflet.Map(center=center,zoom=6)
 
         def build_overview():
             lds = local_datasets_select.value
@@ -1045,6 +1093,7 @@ class LoadDataWidget(widgets.VBox):
 
         help_html = widgets.HTML(layout=widgets.Layout(width='500px'))
         download_help = widgets.HTML()
+        upload_supply_help = widgets.HTML(value='<div style="margin-bottom:20pt"><font size=3>Carga un archivo ZIP actualizado de áreas de cobertura. El ZIP debe contener una carpeta por departamento con los archivos KMZ de cada EPSA.</font></div>')
         button_help = widgets.HTML()
 
         login_widget = widgets.HBox(children=[
@@ -1058,10 +1107,21 @@ class LoadDataWidget(widgets.VBox):
 
         progress_box = widgets.VBox([widgets.HBox([progress_widgets[sk],progress_widgets_html[sk]]) for sk in api_set_keys])
 
+        supply_box = widgets.VBox([
+            upload_supply_help,
+            widgets.HBox([select_file_button,select_file_html]),
+            my_map,
+            widgets.HBox([upload_supply_button,upload_supply_button_html]),
+        ])
+
         download_data_widget = widgets.VBox(children=[
+            download_help,
             widgets.HBox([local_datasets_select,external_datasets_select,]),
             widgets.HBox([overview_html,progress_box]),
+            widgets.HBox([download_button,button_help,]),
         ], layout=widgets.Layout(display='none'))
+
+
 
         def set_help_html(username, password, show_pass):
             user_label = 'Nombre de Usuario:' if username != '' else ''
@@ -1111,7 +1171,7 @@ class LoadDataWidget(widgets.VBox):
                 download_help.value = '<font color="green">Las credenciales son válidas!</font><font color="green">Token guardado. Todo listo para descargar datos.</font></br><div style="margin-bottom:20pt"><font size=3>Selecciona los conjuntos de datos que serán actualizado y/o descargados. Mantén presionado CTRL para seleccionar múltiples conjuntos.</font></div>'
                 update_token_button.layout.display = None
                 download_data_widget.layout.display = None
-                load_data_accordion.selected_index = 1
+                data_accordion.selected_index = 1
                 download_button.disabled = False
 
             else:
@@ -1256,6 +1316,97 @@ class LoadDataWidget(widgets.VBox):
             if not selected_datasets == []: 
                 button_help.value = '<font size=3>Datos Actualizados/Descargados. Los puedes encontrar en la carpeta <a href="http://localhost:8888/tree/datos/" target=_><code><font color="#fcb070">datos</font></code></a> y ahora los puedes usar en las otras aplicaciones! Por ejemplo: <a href="http://localhost:8888/apps/Generar%20Reportes%20POA.ipynb?appmode_scroll=0" target=_><font color="#fcb070">Generar Reportes POA</font></a></font>'
 
+        def check_validity(file_path):
+            if not zipfile.is_zipfile(file_path):
+                upload_supply_button_html.value = 'El archivo no es un ZIP valido.'
+                return False
+            with zipfile.ZipFile(file_path) as zf:
+                for name in zf.namelist():
+                    if name.split('/')[0] not in state_names:
+                        upload_supply_button_html.value = f'Carpeta sin nombre de departamento válido o archivo fuera de carpeta: {name.split("/")[0]}'
+                        return False
+                try:
+                    if not name.split('/')[1][-4:] == '.kmz':
+                        upload_supply_button_html.value = f'Archivo no es del tipo KMZ: {name.split("/")[1]}'
+                        return False
+                except IndexError:
+                    return False
+            return True
+
+        def clean_geojson(geojson_path):
+            with open(geojson_path,'r') as f:
+                supply_geojson = json.load(f)
+
+            if supply_geojson.get('name'):
+                epsa_code = supply_geojson['name']
+                del supply_geojson['name']
+            else:
+                epsa_code = ''
+
+            for feature in supply_geojson['features']:
+                if feature.get('id'):
+                    del feature['id']
+                for prop in ['description','styleUrl','name']:
+                    if feature['properties'].get(prop):
+                        del feature['properties'][prop]
+                feature['properties']['epsa'] = epsa_code
+            
+            return supply_geojson
+
+        def on_select_file_button_click(b):
+            root = Tk()
+            root.withdraw()
+            root.call('wm', 'attributes', '.', '-topmost', True)
+
+            b.file = filedialog.askopenfilename(multiple=False, filetypes=(('ZIP files','*.zip'),))
+            
+            if b.file == '':
+                return
+            
+            b.description = "Archivo Cargado"
+            b.icon = "check-square-o"
+            select_file_html.value = b.file
+                
+            if not check_validity(b.file):
+                return
+                
+            upload_supply_button.disabled = False
+            upload_supply_button.tooltip = 'Todo listo para subir el archivo.'
+            upload_supply_button_html.value = 'El archivo es valido!'
+
+            zip_path = select_file_button.file
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(src_supply_path)
+            
+            aggregate_geojson = {'type': 'FeatureCollection','features': [],}
+            
+            for state in os.listdir(src_supply_path):
+                src_state_path = join(src_supply_path,state)
+                dst_state_path = join(dst_supply_path,state)
+                if not exists(dst_state_path):
+                    os.makedirs(dst_state_path)
+
+                for kmz_path,name in [(join(src_state_path,fn), fn[:-1]+'l') for fn in os.listdir(src_state_path)]:
+                    kml_path = join(dst_state_path,name)
+                    with zipfile.ZipFile(kmz_path,'r') as kmz:
+                        with kmz.open('doc.kml','r') as kml:
+                            with open(kml_path,'wb') as f:
+                                f.write(kml.read())
+                    kml2geojson.main.convert(kml_path,dst_state_path)
+
+                for fn in [x for x in os.listdir(dst_state_path) if x[-8:] == '.geojson']:
+                    new_geojson = clean_geojson(join(dst_state_path,fn))
+                    aggregate_geojson['features'] += new_geojson['features']
+                    
+            with open(join(data_path,'supply_areas.geojson'),'w') as f:
+                json.dump(aggregate_geojson,f)
+                
+            rmtree(src_supply_path)
+            rmtree(dst_supply_path)
+            
+            supply_layer = leaflet.GeoJSON(data=aggregate_geojson)
+            my_map.add_layer(supply_layer)
+                
         username_widget.observe(on_username_change, names='value')
         password_widget.observe(on_password_change, names='value')
         show_password_button.observe(on_show_pass_change, names='value')
@@ -1266,12 +1417,18 @@ class LoadDataWidget(widgets.VBox):
         external_datasets_select.observe(on_external_dataset_select_change,names='value')
         download_button.on_click(on_download_button_click)
 
-        load_data_accordion = widgets.Accordion(children=[
+        select_file_button.on_click(on_select_file_button_click)
+
+        manage_data_widget = widgets.Tab(children=[download_data_widget,supply_box,])
+        manage_data_widget.set_title(0,'Descargar/Actualizar')
+        manage_data_widget.set_title(1,'Subir Áreas de Cobertura')
+
+        data_accordion = widgets.Accordion(children=[
             widgets.VBox([help_html0,login_widget,update_token_button]),
-            widgets.VBox([download_help,download_data_widget,]),
+            manage_data_widget,
         ])
-        load_data_accordion.set_title(0, '1. Ingreso/Autenticación')
-        load_data_accordion.set_title(1, '2. Seleccionar Datos')
+        data_accordion.set_title(0, '1. Ingreso/Autenticación')
+        data_accordion.set_title(1, '2. Manejo de Datos')
 
         if exists(profile_path):
             with open(profile_path,'r') as f:
@@ -1289,9 +1446,9 @@ class LoadDataWidget(widgets.VBox):
             update_token_button.layout.display = None
             download_data_widget.layout.display = None
             download_button.disabled = False
-            load_data_accordion.selected_index = 1
+            data_accordion.selected_index = 1
 
-        super().__init__(children=[load_data_accordion,widgets.HBox([download_button,button_help,])],**kwargs)
+        super().__init__(children=[data_accordion],**kwargs)
 
 
 class GenerateAnualReportWidget(widgets.VBox):
